@@ -4,35 +4,154 @@ import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
 
 const GREEN = "#0f9b76";
+const GREEN_DK = "#0c7d5e";
+const SLATE = "#1c2530";
+const MUTED = "#7c8278";
+const LINE = "#e7e4dd";
+
+const money = (n) => "$ " + new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Math.round(n || 0));
+const CH_LABEL = { manual: "Mostrador", mercadolibre: "MercadoLibre", whatsapp: "WhatsApp", csv: "Importadas", web: "Web" };
+
+function waPhone(p) {
+  let d = (p || "").replace(/[^0-9]/g, "");
+  if (d.startsWith("0")) d = d.slice(1);
+  if (!d.startsWith("54")) d = "54" + d;
+  return d;
+}
 
 function Dashboard() {
-  const [stats, setStats] = useState(null);
-  useEffect(() => {
-    (async () => {
-      const today = new Date().toISOString().slice(0, 10);
-      const [clientes, due] = await Promise.all([
-        supabase.from("customers").select("id", { count: "exact", head: true }),
-        supabase.from("repurchase_predictions").select("id", { count: "exact", head: true }).lte("predicted_runout_date", today).eq("status", "pending"),
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  const [shopName, setShopName] = useState("tu pet shop");
+
+  async function load() {
+    try {
+      const soon = new Date(); soon.setDate(soon.getDate() + 7);
+      const [os, cs, preds, prods, pets, tn] = await Promise.all([
+        supabase.from("orders").select("id,customer_id,channel,total,ordered_at"),
+        supabase.from("customers").select("id,name,phone_e164"),
+        supabase.from("repurchase_predictions").select("id,customer_id,pet_id,product_id,predicted_runout_date,status").eq("status", "pending").lte("predicted_runout_date", soon.toISOString().slice(0, 10)).order("predicted_runout_date"),
+        supabase.from("products").select("id,name"),
+        supabase.from("pets").select("id,name"),
+        supabase.from("tenants").select("name").limit(1).maybeSingle(),
       ]);
-      setStats({ clientes: clientes.count ?? 0, due: due.count ?? 0 });
-    })();
-  }, []);
-  const Card = ({ label, value }) => (
-    <div style={{ flex: 1, background: "#fff", border: "1px solid #e7e4dd", borderRadius: 16, padding: 18 }}>
-      <div style={{ fontSize: 13, color: "#7c8278", marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 30, fontWeight: 800, color: GREEN }}>{value}</div>
+      if (os.error) throw os.error;
+      if (tn.data && tn.data.name) setShopName(tn.data.name);
+
+      const orders = os.data || [];
+      const customers = cs.data || [];
+      const custById = {}; customers.forEach((c) => (custById[c.id] = c));
+      const prodById = {}; (prods.data || []).forEach((p) => (prodById[p.id] = p));
+      const petById = {}; (pets.data || []).forEach((p) => (petById[p.id] = p));
+
+      // Ventas por canal
+      const byChannel = {};
+      orders.forEach((o) => {
+        const ch = o.channel || "manual";
+        if (!byChannel[ch]) byChannel[ch] = { count: 0, total: 0 };
+        byChannel[ch].count += 1;
+        byChannel[ch].total += Number(o.total) || 0;
+      });
+
+      // Primera compra vs recompra (por cliente, orden cronológico)
+      const byCust = {};
+      orders.forEach((o) => { (byCust[o.customer_id] = byCust[o.customer_id] || []).push(o); });
+      let firstRevenue = 0, repRevenue = 0, repOrders = 0, custWithRep = 0;
+      const custCount = Object.keys(byCust).length;
+      Object.values(byCust).forEach((list) => {
+        list.sort((a, b) => (a.ordered_at < b.ordered_at ? -1 : 1));
+        firstRevenue += Number(list[0].total) || 0;
+        if (list.length > 1) {
+          custWithRep += 1;
+          for (let i = 1; i < list.length; i++) { repRevenue += Number(list[i].total) || 0; repOrders += 1; }
+        }
+      });
+      const totalRevenue = firstRevenue + repRevenue;
+      const repRate = custCount ? Math.round((custWithRep / custCount) * 100) : 0;
+
+      // Accionables
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const actions = (preds.data || []).map((p) => {
+        const c = custById[p.customer_id] || {};
+        const prod = prodById[p.product_id] || {};
+        const pet = petById[p.pet_id] || {};
+        const due = new Date(p.predicted_runout_date + "T00:00:00");
+        const days = Math.round((due - today) / 86400000);
+        return { id: p.id, date: p.predicted_runout_date, days, customer: c.name || "Cliente", phone: c.phone_e164 || "", product: prod.name || "el alimento", pet: pet.name || "tu mascota" };
+      });
+
+      setData({ orders: orders.length, customers: customers.length, byChannel, totalRevenue, repRevenue, repOrders, repRate, actions });
+    } catch (e) { setError(e.message || "Error al cargar"); }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function contacted(a) {
+    const cta = `Hola ${a.customer.split(" ")[0]}! 🐾 Te escribimos de ${shopName}. Según nuestras cuentas, ${a.product} de ${a.pet} está por terminarse en estos días. ¿Querés que te preparemos otra bolsa así no te quedás sin? Respondé este mensaje y te lo dejamos listo 😊`;
+    window.open("https://wa.me/" + waPhone(a.phone) + "?text=" + encodeURIComponent(cta), "_blank");
+    await supabase.from("repurchase_predictions").update({ status: "contacted" }).eq("id", a.id);
+    setData((d) => ({ ...d, actions: d.actions.filter((x) => x.id !== a.id) }));
+  }
+
+  const Stat = ({ label, value, sub, accent }) => (
+    <div style={{ background: accent ? GREEN : "#fff", border: `1px solid ${accent ? GREEN : LINE}`, borderRadius: 16, padding: 16 }}>
+      <div style={{ fontSize: 12.5, color: accent ? "rgba(255,255,255,.85)" : MUTED, fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 800, color: accent ? "#fff" : SLATE, marginTop: 2 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: accent ? "rgba(255,255,255,.85)" : MUTED, marginTop: 3 }}>{sub}</div>}
     </div>
   );
+
   return (
-    <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 16px" }}>
+    <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 16px 50px" }}>
       <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 16px" }}>Hola 👋</h1>
-      {!stats ? <p style={{ color: "#7c8278" }}>Cargando métricas…</p> : (
-        <div style={{ display: "flex", gap: 12 }}>
-          <Card label="Clientes" value={stats.clientes} />
-          <Card label="Recompras para contactar" value={stats.due} />
-        </div>
+      {error && <p style={{ color: "#b04b3f" }}>{error}</p>}
+      {!data && !error && <p style={{ color: MUTED }}>Cargando métricas…</p>}
+
+      {data && (
+        <>
+          {/* Accionables primero: es lo que genera plata */}
+          <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16, marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+              <span style={{ fontSize: 15, fontWeight: 800, color: SLATE }}>🔥 Recompras para impulsar</span>
+              <span style={{ fontSize: 12.5, color: MUTED }}>{data.actions.length} pendientes</span>
+            </div>
+            {!data.actions.length && <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Nada por ahora. A medida que cargues ventas de alimento, acá van a aparecer los clientes a contactar antes de que se les termine.</p>}
+            {data.actions.map((a) => (
+              <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${LINE}` }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14.5, fontWeight: 700, color: SLATE }}>{a.customer}</div>
+                  <div style={{ fontSize: 12.5, color: MUTED }}>{a.product} · {a.pet}</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: a.days <= 0 ? "#b04b3f" : GREEN_DK }}>
+                    {a.days < 0 ? `se le acabó hace ${-a.days} d` : a.days === 0 ? "se le acaba hoy" : `se le acaba en ${a.days} d`}
+                  </div>
+                </div>
+                <button onClick={() => contacted(a)} style={{ width: "auto", padding: "10px 14px", fontSize: 13.5, fontWeight: 700, color: "#fff", background: "#25D366", border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
+                  WhatsApp →
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Métricas */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+            <Stat label="Ingresos por recompra" value={money(data.repRevenue)} sub={`${data.repOrders} recompras · plata extra ganada`} accent />
+            <Stat label="Ventas totales" value={money(data.totalRevenue)} sub={`${data.orders} ventas`} />
+            <Stat label="% de clientes que recompran" value={data.repRate + "%"} sub={`de ${data.customers} clientes`} />
+            <Stat label="Clientes" value={data.customers} />
+          </div>
+
+          {/* Por canal */}
+          <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: SLATE, marginBottom: 10 }}>Ventas por canal</div>
+            {!Object.keys(data.byChannel).length && <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Todavía no hay ventas cargadas.</p>}
+            {Object.entries(data.byChannel).map(([ch, v]) => (
+              <div key={ch} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "8px 0", borderBottom: `1px solid ${LINE}` }}>
+                <span style={{ fontWeight: 600, color: SLATE }}>{CH_LABEL[ch] || ch}</span>
+                <span style={{ color: MUTED }}>{v.count} ventas · <b style={{ color: GREEN_DK }}>{money(v.total)}</b></span>
+              </div>
+            ))}
+          </div>
+        </>
       )}
-      <p style={{ fontSize: 13, color: "#9aa097", marginTop: 18 }}>Cargá una venta para ver cómo se agenda la próxima recompra.</p>
     </div>
   );
 }
