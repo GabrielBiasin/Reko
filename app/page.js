@@ -22,7 +22,7 @@ function waPhone(p) {
 function Dashboard() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
-  const [shopName, setShopName] = useState("tu pet shop");
+  const [shopName, setShopName] = useState("tu tienda");
 
   async function load() {
     try {
@@ -129,7 +129,7 @@ function Dashboard() {
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 16px 50px" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 16px" }}>Hola 👋</h1>
+      <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 16px" }}>Reko de <span style={{ color: GREEN }}>{shopName}</span></h1>
       {error && <p style={{ color: "#b04b3f" }}>{error}</p>}
       {!data && !error && <p style={{ color: MUTED }}>Cargando métricas…</p>}
 
