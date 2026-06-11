@@ -31,22 +31,6 @@ function gramsPerDay(species, weightKg, ageYears) {
 
 const CHANNEL_MAP = { mostrador: "manual", mercadolibre: "mercadolibre", whatsapp: "whatsapp" };
 
-const inputStyle = { width: "100%", border: `1px solid ${LINE}`, borderRadius: 11, padding: "13px", fontSize: 16, color: SLATE, background: "#fff", outline: "none", boxSizing: "border-box" };
-const Label = ({ children }) => <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: MUTED, marginBottom: 6 }}>{children}</span>;
-const Seg = ({ value, current, onClick, children }) => {
-  const active = value === current;
-  return <button onClick={() => onClick(value)} style={{ flex: 1, padding: "11px 8px", fontSize: 14, fontWeight: 600, border: `1px solid ${active ? GREEN : LINE}`, background: active ? GREEN : "#fff", color: active ? "#fff" : SLATE, borderRadius: 10, cursor: "pointer" }}>{children}</button>;
-};
-const Card = ({ step, title, children }) => (
-  <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
-    <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 14 }}>
-      <span style={{ width: 24, height: 24, borderRadius: 7, background: GREEN, color: "#fff", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{step}</span>
-      <span style={{ fontSize: 15, fontWeight: 700, color: SLATE }}>{title}</span>
-    </div>
-    {children}
-  </div>
-);
-
 function CargarInner() {
   const [cliente, setCliente] = useState({ nombre: "", whatsapp: "" });
   const [mascota, setMascota] = useState({ nombre: "", especie: "dog", raza: "", peso: "", edad: "" });
@@ -128,6 +112,22 @@ function CargarInner() {
       setEstado({ guardando: false, ok: false, error: err.message || "Error al guardar" });
     }
   };
+
+  const inputStyle = { width: "100%", border: `1px solid ${LINE}`, borderRadius: 11, padding: "13px", fontSize: 16, color: SLATE, background: "#fff", outline: "none", boxSizing: "border-box" };
+  const Label = ({ children }) => <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: MUTED, marginBottom: 6 }}>{children}</span>;
+  const Seg = ({ value, current, onClick, children }) => {
+    const active = value === current;
+    return <button onClick={() => onClick(value)} style={{ flex: 1, padding: "11px 8px", fontSize: 14, fontWeight: 600, border: `1px solid ${active ? GREEN : LINE}`, background: active ? GREEN : "#fff", color: active ? "#fff" : SLATE, borderRadius: 10, cursor: "pointer" }}>{children}</button>;
+  };
+  const Card = ({ step, title, children }) => (
+    <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 14 }}>
+        <span style={{ width: 24, height: 24, borderRadius: 7, background: GREEN, color: "#fff", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{step}</span>
+        <span style={{ fontSize: 15, fontWeight: 700, color: SLATE }}>{title}</span>
+      </div>
+      {children}
+    </div>
+  );
 
   return (
     <div style={{ padding: "16px 12px 28px" }}>
