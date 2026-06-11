@@ -27,12 +27,13 @@ function Dashboard() {
   async function load() {
     try {
       const soon = new Date(); soon.setDate(soon.getDate() + 7);
-      const [os, cs, preds, prods, pets, tn] = await Promise.all([
+      const [os, cs, preds, prods, pets, ois, tn] = await Promise.all([
         supabase.from("orders").select("id,customer_id,channel,total,ordered_at"),
         supabase.from("customers").select("id,name,phone_e164"),
         supabase.from("repurchase_predictions").select("id,customer_id,pet_id,product_id,predicted_runout_date,status").eq("status", "pending").lte("predicted_runout_date", soon.toISOString().slice(0, 10)).order("predicted_runout_date"),
-        supabase.from("products").select("id,name"),
-        supabase.from("pets").select("id,name"),
+        supabase.from("products").select("id,name,is_consumable"),
+        supabase.from("pets").select("id,customer_id,name"),
+        supabase.from("order_items").select("order_id,product_id"),
         supabase.from("tenants").select("name").limit(1).maybeSingle(),
       ]);
       if (os.error) throw os.error;
@@ -80,7 +81,24 @@ function Dashboard() {
         return { id: p.id, date: p.predicted_runout_date, days, customer: c.name || "Cliente", phone: c.phone_e164 || "", product: prod.name || "el alimento", pet: pet.name || "tu mascota" };
       });
 
-      setData({ orders: orders.length, customers: customers.length, byChannel, totalRevenue, repRevenue, repOrders, repRate, actions });
+      // Cross-selling: solo-alimento => ofrecer accesorios; solo-accesorios => ofrecer alimento
+      const orderCust = {}; orders.forEach((o) => (orderCust[o.id] = o.customer_id));
+      const mix = {}; // customer_id -> {food, acc}
+      (ois.data || []).forEach((it) => {
+        const cid = orderCust[it.order_id]; if (!cid) return;
+        const pr = prodById[it.product_id]; if (!pr) return;
+        if (!mix[cid]) mix[cid] = { food: 0, acc: 0 };
+        if (pr.is_consumable) mix[cid].food += 1; else mix[cid].acc += 1;
+      });
+      const petByCust = {}; (pets.data || []).forEach((p) => { if (!petByCust[p.customer_id]) petByCust[p.customer_id] = p; });
+      const crossSell = [];
+      Object.entries(mix).forEach(([cid, m]) => {
+        if (m.food > 0 && m.acc === 0) crossSell.push({ id: cid, dir: "acc", customer: (custById[cid] || {}).name || "Cliente", phone: (custById[cid] || {}).phone_e164 || "", pet: (petByCust[cid] || {}).name || "tu mascota", loyal: (byCust[cid] || []).length > 1 });
+        else if (m.acc > 0 && m.food === 0) crossSell.push({ id: cid, dir: "food", customer: (custById[cid] || {}).name || "Cliente", phone: (custById[cid] || {}).phone_e164 || "", pet: (petByCust[cid] || {}).name || "tu mascota", loyal: (byCust[cid] || []).length > 1 });
+      });
+      crossSell.sort((a, b) => (b.loyal ? 1 : 0) - (a.loyal ? 1 : 0));
+
+      setData({ orders: orders.length, customers: customers.length, byChannel, totalRevenue, repRevenue, repOrders, repRate, actions, crossSell });
     } catch (e) { setError(e.message || "Error al cargar"); }
   }
   useEffect(() => { load(); }, []);
@@ -90,6 +108,15 @@ function Dashboard() {
     window.open("https://wa.me/" + waPhone(a.phone) + "?text=" + encodeURIComponent(cta), "_blank");
     await supabase.from("repurchase_predictions").update({ status: "contacted" }).eq("id", a.id);
     setData((d) => ({ ...d, actions: d.actions.filter((x) => x.id !== a.id) }));
+  }
+
+  function crossCTA(x) {
+    const first = x.customer.split(" ")[0];
+    const cta = x.dir === "acc"
+      ? `Hola ${first}! 🐾 Te escribimos de ${shopName}. Vemos que siempre llevás el alimento de ${x.pet} con nosotros 💚 ¿Sabías que también tenemos juguetes, correas, camitas y todo para mimarlo? Contanos qué le gustaría y te armamos algo lindo.`
+      : `Hola ${first}! 🐾 Te escribimos de ${shopName}. ¿Sabías que también trabajamos el alimento de ${x.pet}? Si nos contás qué come, te avisamos antes de que se le termine así nunca te quedás sin 😊`;
+    window.open("https://wa.me/" + waPhone(x.phone) + "?text=" + encodeURIComponent(cta), "_blank");
+    setData((d) => ({ ...d, crossSell: d.crossSell.filter((y) => y.id !== x.id) }));
   }
 
   const Stat = ({ label, value, sub, accent }) => (
@@ -125,6 +152,26 @@ function Dashboard() {
                   </div>
                 </div>
                 <button onClick={() => contacted(a)} style={{ width: "auto", padding: "10px 14px", fontSize: 13.5, fontWeight: 700, color: "#fff", background: "#25D366", border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
+                  WhatsApp →
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Cross-selling */}
+          <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16, marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+              <span style={{ fontSize: 15, fontWeight: 800, color: SLATE }}>🧲 Cross-selling</span>
+              <span style={{ fontSize: 12.5, color: MUTED }}>{data.crossSell.length} oportunidades</span>
+            </div>
+            {!data.crossSell.length && <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Sin oportunidades por ahora. Acá aparecen clientes que solo compran alimento (para ofrecerles accesorios) o solo accesorios (para sumarlos al alimento).</p>}
+            {data.crossSell.map((x) => (
+              <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${LINE}` }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14.5, fontWeight: 700, color: SLATE }}>{x.customer}{x.loyal && <span style={{ fontSize: 11, fontWeight: 700, color: GREEN_DK, background: "#e9f5f0", borderRadius: 6, padding: "2px 7px", marginLeft: 7 }}>cliente fiel</span>}</div>
+                  <div style={{ fontSize: 12.5, color: MUTED }}>{x.dir === "acc" ? "Solo compra alimento → ofrecer accesorios" : "Solo compra accesorios → ofrecer alimento"}</div>
+                </div>
+                <button onClick={() => crossCTA(x)} style={{ width: "auto", padding: "10px 14px", fontSize: 13.5, fontWeight: 700, color: "#fff", background: "#25D366", border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
                   WhatsApp →
                 </button>
               </div>
