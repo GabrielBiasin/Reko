@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
 
-const GREEN = "#0f9b76";
-const GREEN_DK = "#0c7d5e";
+const GREEN = "#FFB63C";
+const GREEN_DK = "#c77f00";
 const SLATE = "#1c2530";
 const MUTED = "#7c8278";
 const LINE = "#e7e4dd";
@@ -112,7 +112,7 @@ function Dashboard() {
         zones[cp].orders += 1;
         zones[cp].total += Number(o.total) || 0;
       });
-      const zoneList = Object.entries(zones).map(([cp, v]) => ({ cp, ...v })).sort((a, b) => b.orders - a.orders);
+      const zoneList = Object.entries(zones).map(([cp, v]) => ({ cp, ...v })).sort((a, b) => b.customers - a.customers);
 
       setData({ orders: orders.length, customers: customers.length, byChannel, totalRevenue, repRevenue, repOrders, repRate, actions, crossSell, zoneList });
     } catch (e) { setError(e.message || "Error al cargar"); }
@@ -137,15 +137,15 @@ function Dashboard() {
 
   const Stat = ({ label, value, sub, accent }) => (
     <div style={{ background: accent ? GREEN : "#fff", border: `1px solid ${accent ? GREEN : LINE}`, borderRadius: 16, padding: 16 }}>
-      <div style={{ fontSize: 12.5, color: accent ? "rgba(255,255,255,.85)" : MUTED, fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 800, color: accent ? "#fff" : SLATE, marginTop: 2 }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: accent ? "rgba(255,255,255,.85)" : MUTED, marginTop: 3 }}>{sub}</div>}
+      <div style={{ fontSize: 12.5, color: accent ? "rgba(28,37,48,.72)" : MUTED, fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 800, color: SLATE, marginTop: 2 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: accent ? "rgba(28,37,48,.72)" : MUTED, marginTop: 3 }}>{sub}</div>}
     </div>
   );
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 16px 50px" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 16px" }}>Reko de <span style={{ color: GREEN }}>{shopName}</span></h1>
+      <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 16px" }}>Reko de <span style={{ color: GREEN_DK }}>{shopName}</span></h1>
       {error && <p style={{ color: "#b04b3f" }}>{error}</p>}
       {!data && !error && <p style={{ color: MUTED }}>Cargando métricas…</p>}
 
@@ -184,7 +184,7 @@ function Dashboard() {
             {data.crossSell.map((x) => (
               <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${LINE}` }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14.5, fontWeight: 700, color: SLATE }}>{x.customer}{x.loyal && <span style={{ fontSize: 11, fontWeight: 700, color: GREEN_DK, background: "#e9f5f0", borderRadius: 6, padding: "2px 7px", marginLeft: 7 }}>cliente fiel</span>}</div>
+                  <div style={{ fontSize: 14.5, fontWeight: 700, color: SLATE }}>{x.customer}{x.loyal && <span style={{ fontSize: 11, fontWeight: 700, color: GREEN_DK, background: "#fdf3e0", borderRadius: 6, padding: "2px 7px", marginLeft: 7 }}>cliente fiel</span>}</div>
                   <div style={{ fontSize: 12.5, color: MUTED }}>{x.dir === "acc" ? "Solo compra alimento → ofrecer accesorios" : "Solo compra accesorios → ofrecer alimento"}</div>
                 </div>
                 <button onClick={() => crossCTA(x)} style={{ width: "auto", padding: "10px 14px", fontSize: 13.5, fontWeight: 700, color: "#fff", background: "#25D366", border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
@@ -206,12 +206,21 @@ function Dashboard() {
           <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16, marginBottom: 16 }}>
             <div style={{ fontSize: 15, fontWeight: 800, color: SLATE, marginBottom: 10 }}>📍 Zonas (por código postal)</div>
             {(!data.zoneList || !data.zoneList.length) && <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Cargá direcciones con CP en tus clientes para ver qué zonas tenés más cubiertas.</p>}
-            {(data.zoneList || []).slice(0, 10).map((z) => (
-              <div key={z.cp} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "8px 0", borderBottom: `1px solid ${LINE}` }}>
-                <span style={{ fontWeight: 600, color: z.cp === "Sin CP" ? MUTED : SLATE }}>{z.cp === "Sin CP" ? "Sin CP" : "CP " + z.cp}</span>
-                <span style={{ color: MUTED }}>{z.customers} clientes · {z.orders} ventas · <b style={{ color: GREEN_DK }}>{money(z.total)}</b></span>
-              </div>
-            ))}
+            {(data.zoneList || []).slice(0, 10).map((z) => {
+              const pct = data.customers ? Math.round((z.customers / data.customers) * 100) : 0;
+              return (
+                <div key={z.cp} style={{ padding: "9px 0", borderBottom: `1px solid ${LINE}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 14 }}>
+                    <span style={{ fontWeight: 700, color: z.cp === "Sin CP" ? MUTED : SLATE }}>{z.cp === "Sin CP" ? "Sin CP" : "CP " + z.cp}</span>
+                    <span style={{ fontWeight: 800, color: GREEN_DK }}>{pct}%</span>
+                  </div>
+                  <div style={{ height: 8, background: "#f1ede3", borderRadius: 5, overflow: "hidden", margin: "5px 0 4px" }}>
+                    <div style={{ width: pct + "%", height: "100%", background: GREEN }} />
+                  </div>
+                  <div style={{ fontSize: 12, color: MUTED }}>{z.customers} clientes · {z.orders} ventas · {money(z.total)}</div>
+                </div>
+              );
+            })}
           </div>
 
           {/* Por canal */}

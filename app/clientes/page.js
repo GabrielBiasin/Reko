@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
 
-const GREEN = "#0f9b76";
+const GREEN = "#FFB63C";
+const GREEN_DK = "#c77f00";
 const SLATE = "#1c2530";
 const MUTED = "#7c8278";
 const LINE = "#e7e4dd";
@@ -76,7 +77,7 @@ function ClientesInner() {
     <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 16px 50px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
         <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Clientes</h1>
-        <a href="/importar" style={{ fontSize: 13, fontWeight: 600, color: GREEN }}>+ Importar historial</a>
+        <a href="/importar" style={{ fontSize: 13, fontWeight: 600, color: GREEN_DK }}>+ Importar historial</a>
       </div>
       <p style={{ fontSize: 13, color: MUTED, margin: "0 0 14px" }}>Unificados por número de teléfono. Tocá un cliente para ver su perfil.</p>
 
@@ -85,7 +86,7 @@ function ClientesInner() {
 
       {clients && (
         <>
-          <button onClick={exportCSV} disabled={!clients.length} style={{ width: "100%", padding: "11px", fontSize: 14, fontWeight: 700, color: "#fff", background: clients.length ? GREEN : "#c2c8bd", border: "none", borderRadius: 11, cursor: clients.length ? "pointer" : "default", marginBottom: 14 }}>
+          <button onClick={exportCSV} disabled={!clients.length} style={{ width: "100%", padding: "11px", fontSize: 14, fontWeight: 700, color: SLATE, background: clients.length ? GREEN : "#c2c8bd", border: "none", borderRadius: 11, cursor: clients.length ? "pointer" : "default", marginBottom: 14 }}>
             Exportar CSV ({clients.length})
           </button>
           {!clients.length && <p style={{ color: MUTED }}>Todavía no hay clientes. Cargá una venta o importá historial.</p>}
@@ -98,14 +99,14 @@ function ClientesInner() {
                 <div onClick={() => setOpen(isOpen ? null : c.key)} style={{ padding: 14, cursor: "pointer" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                     <span style={{ fontSize: 16, fontWeight: 700, color: SLATE }}>{c.name || "Sin nombre"}</span>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: GREEN }}>{money(c.total)}</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: GREEN_DK }}>{money(c.total)}</span>
                   </div>
                   <div style={{ fontSize: 13, color: MUTED, marginTop: 2 }}>{c.phone}{c.addr ? " · " + c.addr : ""}{c.cp ? " · CP " + c.cp : ""}</div>
                   <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 12.5, color: MUTED }}>
                     <span>🐾 {c.pets.length}</span>
                     <span>🛒 {c.orders.length}</span>
                     {c.last && <span>última: {c.last.slice(0, 10)}</span>}
-                    <span style={{ marginLeft: "auto", color: GREEN }}>{isOpen ? "▲" : "▼"}</span>
+                    <span style={{ marginLeft: "auto", color: GREEN_DK }}>{isOpen ? "▲" : "▼"}</span>
                   </div>
                 </div>
 

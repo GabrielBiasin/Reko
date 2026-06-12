@@ -4,8 +4,8 @@ import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
 import { CATALOG } from "@/lib/catalog";
 
-const GREEN = "#0f9b76";
-const GREEN_DK = "#0c7d5e";
+const GREEN = "#FFB63C";
+const GREEN_DK = "#c77f00";
 const SLATE = "#1c2530";
 const MUTED = "#7c8278";
 const LINE = "#e7e4dd";
@@ -36,12 +36,12 @@ const inputStyle = { width: "100%", border: `1px solid ${LINE}`, borderRadius: 1
 const Label = ({ children }) => <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: MUTED, marginBottom: 6 }}>{children}</span>;
 const Seg = ({ value, current, onClick, children }) => {
   const active = value === current;
-  return <button onClick={() => onClick(value)} style={{ flex: 1, padding: "11px 8px", fontSize: 14, fontWeight: 600, border: `1px solid ${active ? GREEN : LINE}`, background: active ? GREEN : "#fff", color: active ? "#fff" : SLATE, borderRadius: 10, cursor: "pointer" }}>{children}</button>;
+  return <button onClick={() => onClick(value)} style={{ flex: 1, padding: "11px 8px", fontSize: 14, fontWeight: 600, border: `1px solid ${active ? GREEN : LINE}`, background: active ? GREEN : "#fff", color: SLATE, borderRadius: 10, cursor: "pointer" }}>{children}</button>;
 };
 const Card = ({ step, title, children }) => (
   <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
     <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 14 }}>
-      <span style={{ width: 24, height: 24, borderRadius: 7, background: GREEN, color: "#fff", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{step}</span>
+      <span style={{ width: 24, height: 24, borderRadius: 7, background: GREEN, color: SLATE, fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{step}</span>
       <span style={{ fontSize: 15, fontWeight: 700, color: SLATE }}>{title}</span>
     </div>
     {children}
@@ -238,13 +238,13 @@ function CargarInner() {
                 ))}
               </div>
             )}
-            <button onClick={startNewClient} style={{ marginTop: 12, padding: "11px", fontSize: 14, fontWeight: 600, color: GREEN, background: "#fff", border: `1px dashed ${GREEN}`, borderRadius: 10, cursor: "pointer", width: "100%" }}>+ Cliente nuevo</button>
+            <button onClick={startNewClient} style={{ marginTop: 12, padding: "11px", fontSize: 14, fontWeight: 600, color: GREEN_DK, background: "#fff", border: `1px dashed ${GREEN}`, borderRadius: 10, cursor: "pointer", width: "100%" }}>+ Cliente nuevo</button>
           </div>
         )}
 
         {selectedClient && (
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f0f7f4", border: `1px solid ${LINE}`, borderRadius: 11, padding: "11px 13px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fdf6e9", border: `1px solid ${LINE}`, borderRadius: 11, padding: "11px 13px" }}>
               <div><div style={{ fontWeight: 700 }}>{selectedClient.name || "Sin nombre"}</div><div style={{ fontSize: 13, color: MUTED }}>{selectedClient.phone_e164}</div>{selectedClient.address_full && <div style={{ fontSize: 12.5, color: MUTED }}>{selectedClient.address_full}{selectedClient.postal_code ? " · CP " + selectedClient.postal_code : ""}</div>}</div>
               <button onClick={resetClient} style={{ width: "auto", margin: 0, padding: "6px 10px", fontSize: 13, color: MUTED, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, cursor: "pointer" }}>Cambiar</button>
             </div>
@@ -252,9 +252,9 @@ function CargarInner() {
               <Label>Mascota</Label>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {clientPets.map((p) => (
-                  <button key={p.id} onClick={() => setSelectedPetId(p.id)} style={{ width: "auto", margin: 0, padding: "8px 12px", fontSize: 14, fontWeight: 600, border: `1px solid ${selectedPetId === p.id ? GREEN : LINE}`, background: selectedPetId === p.id ? GREEN : "#fff", color: selectedPetId === p.id ? "#fff" : SLATE, borderRadius: 999, cursor: "pointer" }}>{p.name || (p.species === "cat" ? "Gato" : "Perro")}</button>
+                  <button key={p.id} onClick={() => setSelectedPetId(p.id)} style={{ width: "auto", margin: 0, padding: "8px 12px", fontSize: 14, fontWeight: 600, border: `1px solid ${selectedPetId === p.id ? GREEN : LINE}`, background: selectedPetId === p.id ? GREEN : "#fff", color: SLATE, borderRadius: 999, cursor: "pointer" }}>{p.name || (p.species === "cat" ? "Gato" : "Perro")}</button>
                 ))}
-                <button onClick={() => setSelectedPetId("new")} style={{ width: "auto", margin: 0, padding: "8px 12px", fontSize: 14, fontWeight: 600, border: `1px dashed ${selectedPetId === "new" ? GREEN : LINE}`, background: "#fff", color: selectedPetId === "new" ? GREEN : MUTED, borderRadius: 999, cursor: "pointer" }}>+ Nueva</button>
+                <button onClick={() => setSelectedPetId("new")} style={{ width: "auto", margin: 0, padding: "8px 12px", fontSize: 14, fontWeight: 600, border: `1px dashed ${selectedPetId === "new" ? GREEN : LINE}`, background: "#fff", color: selectedPetId === "new" ? GREEN_DK : MUTED, borderRadius: 999, cursor: "pointer" }}>+ Nueva</button>
               </div>
             </div>
           </div>
@@ -313,7 +313,7 @@ function CargarInner() {
                   {p.type === "alimento" && p.sizes && p.sizes.length > 0 && <span style={{ color: MUTED, fontSize: 12.5 }}> · {p.sizes.join(" / ")} kg</span>}
                 </div>
               ))}
-              <div onClick={useTypedProduct} style={{ ...optStyle, borderBottom: "none", color: GREEN, fontWeight: 600 }}>Usar “{productQuery}” como producto nuevo</div>
+              <div onClick={useTypedProduct} style={{ ...optStyle, borderBottom: "none", color: GREEN_DK, fontWeight: 600 }}>Usar “{productQuery}” como producto nuevo</div>
             </div>
           )}
         </div>
@@ -324,7 +324,7 @@ function CargarInner() {
             {selectedProduct && selectedProduct.sizes && selectedProduct.sizes.length > 0 ? (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {selectedProduct.sizes.map((s) => (
-                  <button key={s} onClick={() => setPackKg(String(s))} style={{ width: "auto", margin: 0, padding: "10px 14px", fontSize: 14, fontWeight: 700, border: `1px solid ${String(s) === packKg ? GREEN : LINE}`, background: String(s) === packKg ? GREEN : "#fff", color: String(s) === packKg ? "#fff" : SLATE, borderRadius: 10, cursor: "pointer" }}>{s} kg</button>
+                  <button key={s} onClick={() => setPackKg(String(s))} style={{ width: "auto", margin: 0, padding: "10px 14px", fontSize: 14, fontWeight: 700, border: `1px solid ${String(s) === packKg ? GREEN : LINE}`, background: String(s) === packKg ? GREEN : "#fff", color: SLATE, borderRadius: 10, cursor: "pointer" }}>{s} kg</button>
                 ))}
               </div>
             ) : (
@@ -347,14 +347,14 @@ function CargarInner() {
       </Card>
 
       {prediccion && (
-        <div style={{ background: GREEN, color: "#fff", borderRadius: 16, padding: "16px 18px", marginBottom: 14 }}>
+        <div style={{ background: GREEN, color: SLATE, borderRadius: 16, padding: "16px 18px", marginBottom: 14 }}>
           <div style={{ fontSize: 12.5, opacity: 0.9, fontWeight: 600 }}>Próxima recompra estimada</div>
           <div style={{ fontSize: 24, fontWeight: 800 }}>en ~{prediccion.dias} días · {prediccion.fecha}</div>
           <div style={{ fontSize: 12.5, opacity: 0.92, marginTop: 5 }}>Consume ~{prediccion.gpd} g/día. Reko avisará unos días antes.</div>
         </div>
       )}
 
-      <button onClick={guardar} disabled={estado.guardando} style={{ width: "100%", padding: 15, fontSize: 16, fontWeight: 700, color: "#fff", background: estado.guardando ? "#c2c8bd" : GREEN, border: "none", borderRadius: 12, cursor: estado.guardando ? "default" : "pointer" }}>
+      <button onClick={guardar} disabled={estado.guardando} style={{ width: "100%", padding: 15, fontSize: 16, fontWeight: 700, color: SLATE, background: estado.guardando ? "#c2c8bd" : GREEN, border: "none", borderRadius: 12, cursor: estado.guardando ? "default" : "pointer" }}>
         {estado.guardando ? "Guardando…" : "Guardar venta"}
       </button>
       {estado.ok && <p style={{ color: GREEN_DK, fontWeight: 600, textAlign: "center", marginTop: 10 }}>✓ Guardado{prediccion ? ". Recompra agendada para " + prediccion.fecha : ""}.</p>}

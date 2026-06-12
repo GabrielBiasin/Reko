@@ -3,7 +3,8 @@ import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
 
-const GREEN = "#0f9b76";
+const GREEN = "#FFB63C";
+const GREEN_DK = "#c77f00";
 const SLATE = "#1c2530";
 const MUTED = "#7c8278";
 const LINE = "#e7e4dd";
@@ -144,15 +145,15 @@ function ImportarInner() {
         <div style={box}>
           <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>3. Confirmar</div>
           <p style={{ fontSize: 13, color: MUTED, margin: "0 0 10px" }}>{rows.length} filas listas para importar.</p>
-          <button onClick={doImport} disabled={busy} style={{ width: "100%", padding: 14, fontSize: 15, fontWeight: 700, color: "#fff", background: busy ? "#c2c8bd" : GREEN, border: "none", borderRadius: 11, cursor: busy ? "default" : "pointer" }}>
+          <button onClick={doImport} disabled={busy} style={{ width: "100%", padding: 14, fontSize: 15, fontWeight: 700, color: SLATE, background: busy ? "#c2c8bd" : GREEN, border: "none", borderRadius: 11, cursor: busy ? "default" : "pointer" }}>
             {busy ? "Importando… " + progress + "%" : "Importar " + rows.length + " filas"}
           </button>
         </div>
       )}
 
-      {status && <p style={{ fontSize: 13.5, color: status.indexOf("error") >= 0 || status.indexOf("pude") >= 0 ? "#b04b3f" : GREEN, fontWeight: 600 }}>{status}</p>}
+      {status && <p style={{ fontSize: 13.5, color: status.indexOf("error") >= 0 || status.indexOf("pude") >= 0 ? "#b04b3f" : GREEN_DK, fontWeight: 600 }}>{status}</p>}
 
-      <p style={{ marginTop: 16 }}><a href="/clientes" style={{ fontSize: 13, fontWeight: 600, color: GREEN }}>← Ver clientes</a></p>
+      <p style={{ marginTop: 16 }}><a href="/clientes" style={{ fontSize: 13, fontWeight: 600, color: GREEN_DK }}>← Ver clientes</a></p>
     </div>
   );
 }

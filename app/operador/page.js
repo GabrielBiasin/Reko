@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
 
-const GREEN = "#0f9b76";
+const GREEN = "#FFB63C";
 const SLATE = "#1c2530";
 const MUTED = "#7c8278";
 const LINE = "#e7e4dd";
@@ -33,7 +33,7 @@ function OperadorInner() {
     const r = await api("list");
     if (r.error) { setDenied(r.error); return; }
     const d = {};
-    (r.tenants || []).forEach((t) => { d[t.id] = { name: t.name || "", brand_color: t.brand_color || "#0f9b76", accent_emoji: t.accent_emoji || "", plan: t.plan || "", status: t.status || "active" }; });
+    (r.tenants || []).forEach((t) => { d[t.id] = { name: t.name || "", brand_color: t.brand_color || "#FFB63C", accent_emoji: t.accent_emoji || "", plan: t.plan || "", status: t.status || "active" }; });
     setDraft(d);
     setData(r);
   }
@@ -85,7 +85,7 @@ function OperadorInner() {
         <>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>Clientes (shops)</h2>
-            <button onClick={newTenant} style={btn(GREEN, "#fff")}>+ Nuevo cliente</button>
+            <button onClick={newTenant} style={btn(GREEN, SLATE)}>+ Nuevo cliente</button>
           </div>
           {data.tenants.map((t) => {
             const d = draft[t.id] || {};
@@ -119,7 +119,7 @@ function OperadorInner() {
                   </div>
                 </div>
                 <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>{userCount(t.id)} usuarios · {(data.custCounts && data.custCounts[t.id]) || 0} clientes finales · creado {fmtDate(t.created_at)}</div>
-                <button onClick={() => saveTenant(t.id)} style={{ ...btn(GREEN, "#fff"), width: "100%", marginTop: 10, padding: 12 }}>Guardar cambios</button>
+                <button onClick={() => saveTenant(t.id)} style={{ ...btn(GREEN, SLATE), width: "100%", marginTop: 10, padding: 12 }}>Guardar cambios</button>
               </div>
             );
           })}
