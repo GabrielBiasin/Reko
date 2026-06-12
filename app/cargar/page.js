@@ -58,7 +58,7 @@ function CargarInner() {
   const [clientResults, setClientResults] = useState([]);
   const [selectedClient, setSelectedClient] = useState(null);
   const [isNewClient, setIsNewClient] = useState(false);
-  const [newClient, setNewClient] = useState({ nombre: "", whatsapp: "" });
+  const [newClient, setNewClient] = useState({ nombre: "", whatsapp: "", direccion: "", cp: "" });
   const [clientPets, setClientPets] = useState([]);
   const [selectedPetId, setSelectedPetId] = useState(null); // id | "new" | null
 
@@ -80,7 +80,7 @@ function CargarInner() {
     const q = clientQuery.trim();
     if (selectedClient || isNewClient || q.length < 2) { setClientResults([]); return; }
     (async () => {
-      const { data } = await supabase.from("customers").select("id,name,phone_e164").or(`name.ilike.%${q}%,phone_e164.ilike.%${q}%`).limit(8);
+      const { data } = await supabase.from("customers").select("id,name,phone_e164,address_full,postal_code").or(`name.ilike.%${q}%,phone_e164.ilike.%${q}%`).limit(8);
       if (!active) return;
       const seen = {}; const out = [];
       (data || []).forEach((c) => { const k = normPhone(c.phone_e164) || "id" + c.id; if (!seen[k]) { seen[k] = 1; out.push(c); } });
@@ -159,7 +159,7 @@ function CargarInner() {
     const phone = newClient.whatsapp;
     const ex = await supabase.from("customers").select("id").eq("phone_e164", phone).limit(1).maybeSingle();
     if (ex.data) return ex.data.id;
-    const { data, error } = await supabase.from("customers").insert({ name: newClient.nombre, phone_e164: phone, channel_origin: CHANNEL_MAP[venta.origen], lifecycle_stage: "active" }).select("id").single();
+    const { data, error } = await supabase.from("customers").insert({ name: newClient.nombre, phone_e164: phone, channel_origin: CHANNEL_MAP[venta.origen], lifecycle_stage: "active", address_full: newClient.direccion.trim() || null, postal_code: newClient.cp.trim() || null }).select("id").single();
     if (error) throw error;
     return data.id;
   }
@@ -192,7 +192,9 @@ function CargarInner() {
 
       const productId = await findOrCreateProduct(custId);
 
-      const { data: o, error: eo } = await supabase.from("orders").insert({ customer_id: custId, channel: CHANNEL_MAP[venta.origen], total: precioNum || 0, status: "paid" }).select("id").single();
+      const dAddr = selectedClient ? (selectedClient.address_full || null) : (newClient.direccion.trim() || null);
+      const dCp = selectedClient ? (selectedClient.postal_code || null) : (newClient.cp.trim() || null);
+      const { data: o, error: eo } = await supabase.from("orders").insert({ customer_id: custId, channel: CHANNEL_MAP[venta.origen], total: precioNum || 0, status: "paid", delivery_address: dAddr, delivery_postal_code: dCp }).select("id").single();
       if (eo) throw eo;
 
       if (productId) {
@@ -243,7 +245,7 @@ function CargarInner() {
         {selectedClient && (
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f0f7f4", border: `1px solid ${LINE}`, borderRadius: 11, padding: "11px 13px" }}>
-              <div><div style={{ fontWeight: 700 }}>{selectedClient.name || "Sin nombre"}</div><div style={{ fontSize: 13, color: MUTED }}>{selectedClient.phone_e164}</div></div>
+              <div><div style={{ fontWeight: 700 }}>{selectedClient.name || "Sin nombre"}</div><div style={{ fontSize: 13, color: MUTED }}>{selectedClient.phone_e164}</div>{selectedClient.address_full && <div style={{ fontSize: 12.5, color: MUTED }}>{selectedClient.address_full}{selectedClient.postal_code ? " · CP " + selectedClient.postal_code : ""}</div>}</div>
               <button onClick={resetClient} style={{ width: "auto", margin: 0, padding: "6px 10px", fontSize: 13, color: MUTED, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, cursor: "pointer" }}>Cambiar</button>
             </div>
             <div style={{ marginTop: 12 }}>
@@ -268,6 +270,10 @@ function CargarInner() {
             <div style={{ height: 10 }} />
             <Label>WhatsApp</Label>
             <input style={inputStyle} inputMode="tel" value={newClient.whatsapp} onChange={(e) => setNewClient({ ...newClient, whatsapp: e.target.value })} placeholder="+54 9 11 ..." />
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              <div style={{ flex: 2 }}><Label>Dirección</Label><input style={inputStyle} value={newClient.direccion} onChange={(e) => setNewClient({ ...newClient, direccion: e.target.value })} placeholder="Av. Cazón 1234, Tigre" /></div>
+              <div style={{ flex: 1 }}><Label>Cód. postal</Label><input style={inputStyle} value={newClient.cp} onChange={(e) => setNewClient({ ...newClient, cp: e.target.value })} placeholder="1648" /></div>
+            </div>
           </div>
         )}
       </Card>

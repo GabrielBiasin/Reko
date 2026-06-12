@@ -21,7 +21,7 @@ function ClientesInner() {
     (async () => {
       try {
         const [cs, ps, os, ois, prs] = await Promise.all([
-          supabase.from("customers").select("id,name,phone_e164,created_at"),
+          supabase.from("customers").select("id,name,phone_e164,created_at,address_full,postal_code"),
           supabase.from("pets").select("customer_id,name,species,weight_kg,life_stage"),
           supabase.from("orders").select("id,customer_id,total,ordered_at"),
           supabase.from("order_items").select("order_id,product_id,qty,unit_price"),
@@ -37,9 +37,11 @@ function ClientesInner() {
         customers.forEach((c) => {
           const key = normPhone(c.phone_e164) || "sintel-" + c.id;
           idToKey[c.id] = key;
-          if (!groups[key]) groups[key] = { key, phone: c.phone_e164 || "—", name: c.name || "", merged: 0, pets: [], orders: [], total: 0, food: 0, acc: 0, last: null };
+          if (!groups[key]) groups[key] = { key, phone: c.phone_e164 || "—", name: c.name || "", addr: "", cp: "", merged: 0, pets: [], orders: [], total: 0, food: 0, acc: 0, last: null };
           groups[key].merged += 1;
           if (c.name && !groups[key].name) groups[key].name = c.name;
+          if (c.address_full && !groups[key].addr) groups[key].addr = c.address_full;
+          if (c.postal_code && !groups[key].cp) groups[key].cp = c.postal_code;
         });
         pets.forEach((p) => { const k = idToKey[p.customer_id]; if (groups[k]) groups[k].pets.push(p); });
         orders.forEach((o) => {
@@ -59,11 +61,11 @@ function ClientesInner() {
 
   function exportCSV() {
     if (!clients || !clients.length) return;
-    const header = ["nombre", "telefono", "mascotas", "compras", "total_gastado", "pct_alimento", "ultima_compra"];
+    const header = ["nombre", "telefono", "direccion", "cp", "mascotas", "compras", "total_gastado", "pct_alimento", "ultima_compra"];
     const rows = [header];
     clients.forEach((c) => {
       const tot = c.food + c.acc; const pct = tot ? Math.round((c.food / tot) * 100) : 0;
-      rows.push([c.name, c.phone, c.pets.length, c.orders.length, c.total, pct + "%", c.last ? c.last.slice(0, 10) : ""]);
+      rows.push([c.name, c.phone, c.addr, c.cp, c.pets.length, c.orders.length, c.total, pct + "%", c.last ? c.last.slice(0, 10) : ""]);
     });
     const csv = rows.map((r) => r.map((v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"').join(",")).join("\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
@@ -98,7 +100,7 @@ function ClientesInner() {
                     <span style={{ fontSize: 16, fontWeight: 700, color: SLATE }}>{c.name || "Sin nombre"}</span>
                     <span style={{ fontSize: 14, fontWeight: 700, color: GREEN }}>{money(c.total)}</span>
                   </div>
-                  <div style={{ fontSize: 13, color: MUTED, marginTop: 2 }}>{c.phone}</div>
+                  <div style={{ fontSize: 13, color: MUTED, marginTop: 2 }}>{c.phone}{c.addr ? " · " + c.addr : ""}{c.cp ? " · CP " + c.cp : ""}</div>
                   <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 12.5, color: MUTED }}>
                     <span>🐾 {c.pets.length}</span>
                     <span>🛒 {c.orders.length}</span>

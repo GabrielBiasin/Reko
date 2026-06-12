@@ -28,8 +28,8 @@ function Dashboard() {
     try {
       const soon = new Date(); soon.setDate(soon.getDate() + 7);
       const [os, cs, preds, prods, pets, ois, tn] = await Promise.all([
-        supabase.from("orders").select("id,customer_id,channel,total,ordered_at"),
-        supabase.from("customers").select("id,name,phone_e164"),
+        supabase.from("orders").select("id,customer_id,channel,total,ordered_at,delivery_postal_code"),
+        supabase.from("customers").select("id,name,phone_e164,postal_code"),
         supabase.from("repurchase_predictions").select("id,customer_id,pet_id,product_id,predicted_runout_date,status").eq("status", "pending").lte("predicted_runout_date", soon.toISOString().slice(0, 10)).order("predicted_runout_date"),
         supabase.from("products").select("id,name,is_consumable"),
         supabase.from("pets").select("id,customer_id,name"),
@@ -98,7 +98,23 @@ function Dashboard() {
       });
       crossSell.sort((a, b) => (b.loyal ? 1 : 0) - (a.loyal ? 1 : 0));
 
-      setData({ orders: orders.length, customers: customers.length, byChannel, totalRevenue, repRevenue, repOrders, repRate, actions, crossSell });
+      // Zonas por código postal (clientes y ventas)
+      const zones = {};
+      customers.forEach((c) => {
+        const cp = (c.postal_code || "").trim() || "Sin CP";
+        if (!zones[cp]) zones[cp] = { customers: 0, orders: 0, total: 0 };
+        zones[cp].customers += 1;
+      });
+      orders.forEach((o) => {
+        const c = custById[o.customer_id];
+        const cp = (o.delivery_postal_code || (c && c.postal_code) || "").trim() || "Sin CP";
+        if (!zones[cp]) zones[cp] = { customers: 0, orders: 0, total: 0 };
+        zones[cp].orders += 1;
+        zones[cp].total += Number(o.total) || 0;
+      });
+      const zoneList = Object.entries(zones).map(([cp, v]) => ({ cp, ...v })).sort((a, b) => b.orders - a.orders);
+
+      setData({ orders: orders.length, customers: customers.length, byChannel, totalRevenue, repRevenue, repOrders, repRate, actions, crossSell, zoneList });
     } catch (e) { setError(e.message || "Error al cargar"); }
   }
   useEffect(() => { load(); }, []);
@@ -184,6 +200,18 @@ function Dashboard() {
             <Stat label="Ventas totales" value={money(data.totalRevenue)} sub={`${data.orders} ventas`} />
             <Stat label="% de clientes que recompran" value={data.repRate + "%"} sub={`de ${data.customers} clientes`} />
             <Stat label="Clientes" value={data.customers} />
+          </div>
+
+          {/* Zonas */}
+          <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16, marginBottom: 16 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: SLATE, marginBottom: 10 }}>📍 Zonas (por código postal)</div>
+            {(!data.zoneList || !data.zoneList.length) && <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Cargá direcciones con CP en tus clientes para ver qué zonas tenés más cubiertas.</p>}
+            {(data.zoneList || []).slice(0, 10).map((z) => (
+              <div key={z.cp} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "8px 0", borderBottom: `1px solid ${LINE}` }}>
+                <span style={{ fontWeight: 600, color: z.cp === "Sin CP" ? MUTED : SLATE }}>{z.cp === "Sin CP" ? "Sin CP" : "CP " + z.cp}</span>
+                <span style={{ color: MUTED }}>{z.customers} clientes · {z.orders} ventas · <b style={{ color: GREEN_DK }}>{money(z.total)}</b></span>
+              </div>
+            ))}
           </div>
 
           {/* Por canal */}
