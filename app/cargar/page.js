@@ -108,24 +108,34 @@ function CargarInner() {
     if (selectedProduct && selectedProduct.name.toLowerCase() === q) { setProductResults([]); return; }
     if (q.length < 2) { setProductResults([]); return; }
     (async () => {
+      const chan = CHANNEL_MAP[venta.origen] || "manual";
+      const cat = await supabase.from("catalog_items").select("name,species,type,pack_kg,price").eq("channel", chan).ilike("name", `%${q}%`).limit(10);
       const fromCat = CATALOG.filter((p) => p.name.toLowerCase().includes(q));
-      const { data } = await supabase.from("products").select("name,species,is_consumable,net_weight_g").ilike("name", `%${q}%`).limit(8);
+      const { data } = await supabase.from("products").select("name,species,is_consumable,net_weight_g").ilike("name", `%${q}%`).limit(6);
       const seen = {}; const out = [];
-      fromCat.forEach((p) => { const k = p.name.toLowerCase(); if (!seen[k]) { seen[k] = 1; out.push(p); } });
+      // 1) catálogo del canal (con precio y presentación)
+      (cat.data || []).forEach((p) => {
+        const k = (p.name || "").toLowerCase() + "|" + (p.pack_kg || "");
+        if (!p.name || seen[k]) return; seen[k] = 1;
+        out.push({ name: p.name, species: p.species || mascota.especie, type: p.type || "alimento", sizes: p.pack_kg ? [Number(p.pack_kg)] : [], price: p.price != null ? Number(p.price) : null, fromCatalog: true });
+      });
+      // 2) catálogo semilla (genérico)
+      fromCat.forEach((p) => { const k = p.name.toLowerCase() + "|seed"; if (!seen[p.name.toLowerCase()] && !seen[k]) { seen[k] = 1; out.push({ ...p, price: null }); } });
+      // 3) productos ya vendidos
       (data || []).forEach((p) => {
-        const k = (p.name || "").toLowerCase(); if (!k || seen[k]) return; seen[k] = 1;
-        out.push({ name: p.name, species: p.species || "dog", type: p.is_consumable ? "alimento" : "accesorio", sizes: p.net_weight_g ? [Math.round(p.net_weight_g) / 1000] : [] });
+        const k = (p.name || "").toLowerCase() + "|prod"; if (!p.name || seen[k]) return; seen[k] = 1;
+        out.push({ name: p.name, species: p.species || "dog", type: p.is_consumable ? "alimento" : "accesorio", sizes: p.net_weight_g ? [Math.round(p.net_weight_g) / 1000] : [], price: null });
       });
       if (!active) return;
-      setProductResults(out.slice(0, 7));
+      setProductResults(out.slice(0, 8));
     })();
     return () => { active = false; };
-  }, [productQuery, selectedProduct]);
+  }, [productQuery, selectedProduct, venta.origen]);
 
   function pickProduct(p) {
     setSelectedProduct(p); setProductQuery(p.name); setProductResults([]);
-    setVenta((v) => ({ ...v, tipo: p.type }));
-    if (p.type === "alimento" && p.sizes && p.sizes.length === 1) setPackKg(String(p.sizes[0]));
+    setVenta((v) => ({ ...v, tipo: p.type, precio: p.price != null ? String(p.price) : v.precio }));
+    if (p.sizes && p.sizes.length === 1) setPackKg(String(p.sizes[0]));
     else setPackKg("");
   }
   function useTypedProduct() {
@@ -220,7 +230,16 @@ function CargarInner() {
 
   return (
     <div style={{ maxWidth: 560, margin: "0 auto", padding: "20px 16px 60px" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 16px" }}>Cargar venta</h1>
+      <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 12px" }}>Cargar venta</h1>
+
+      <Card step="·" title="Canal de venta">
+        <div style={{ display: "flex", gap: 8 }}>
+          <Seg value="mostrador" current={venta.origen} onClick={(v) => { setVenta({ ...venta, origen: v }); setSelectedProduct(null); setProductQuery(""); setPackKg(""); }}>Mostrador</Seg>
+          <Seg value="mercadolibre" current={venta.origen} onClick={(v) => { setVenta({ ...venta, origen: v }); setSelectedProduct(null); setProductQuery(""); setPackKg(""); }}>MercadoLibre</Seg>
+          <Seg value="whatsapp" current={venta.origen} onClick={(v) => { setVenta({ ...venta, origen: v }); setSelectedProduct(null); setProductQuery(""); setPackKg(""); }}>WhatsApp</Seg>
+        </div>
+        <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>El producto y el precio se filtran según el canal elegido.</div>
+      </Card>
 
       {/* 1 · Cliente */}
       <Card step={1} title="Cliente">
@@ -310,7 +329,8 @@ function CargarInner() {
               {productResults.map((p, i) => (
                 <div key={i} onClick={() => pickProduct(p)} style={optStyle}>
                   <span style={{ fontWeight: 600 }}>{p.name}</span>
-                  {p.type === "alimento" && p.sizes && p.sizes.length > 0 && <span style={{ color: MUTED, fontSize: 12.5 }}> · {p.sizes.join(" / ")} kg</span>}
+                  {p.sizes && p.sizes.length > 0 && <span style={{ color: MUTED, fontSize: 12.5 }}> · {p.sizes.join(" / ")} kg</span>}
+                  {p.price != null && <span style={{ color: GREEN_DK, fontSize: 12.5, fontWeight: 700 }}> · $ {new Intl.NumberFormat("es-AR").format(p.price)}</span>}
                 </div>
               ))}
               <div onClick={useTypedProduct} style={{ ...optStyle, borderBottom: "none", color: GREEN_DK, fontWeight: 600 }}>Usar “{productQuery}” como producto nuevo</div>
@@ -333,16 +353,9 @@ function CargarInner() {
           </div>
         )}
 
-        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-          <div style={{ flex: 1 }}><Label>Precio</Label><input style={inputStyle} inputMode="decimal" value={venta.precio} onChange={(e) => setVenta({ ...venta, precio: e.target.value })} placeholder="28000" /></div>
-          <div style={{ flex: 1 }}>
-            <Label>Canal</Label>
-            <select style={inputStyle} value={venta.origen} onChange={(e) => setVenta({ ...venta, origen: e.target.value })}>
-              <option value="mostrador">Mostrador</option>
-              <option value="mercadolibre">MercadoLibre</option>
-              <option value="whatsapp">WhatsApp</option>
-            </select>
-          </div>
+        <div style={{ marginTop: 12 }}>
+          <Label>Precio</Label>
+          <input style={inputStyle} inputMode="decimal" value={venta.precio} onChange={(e) => setVenta({ ...venta, precio: e.target.value })} placeholder="28000" />
         </div>
       </Card>
 
