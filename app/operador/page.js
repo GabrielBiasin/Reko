@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
 
@@ -15,6 +16,7 @@ const inputStyle = { width: "100%", border: `1px solid ${LINE}`, borderRadius: 1
 const btn = (bg, color, border) => ({ padding: "10px 14px", fontSize: 13.5, fontWeight: 700, color, background: bg, border: border || "none", borderRadius: 10, cursor: "pointer" });
 
 function OperadorInner() {
+  const router = useRouter();
   const [data, setData] = useState(null);
   const [denied, setDenied] = useState("");
   const [draft, setDraft] = useState({});
@@ -63,6 +65,16 @@ function OperadorInner() {
     if (r.error) alert(r.error);
   }
 
+  async function enterSupport(t) {
+    const { error } = await supabase.rpc("support_enter", { target: t.id });
+    if (error) { alert(error.message); return; }
+    window.location.href = "/";
+  }
+  const usersOf = (tid) => {
+    if (!data) return [];
+    const ids = (data.pub || []).filter((p) => p.tenant_id === tid).map((p) => p.id);
+    return (data.users || []).filter((u) => ids.includes(u.id));
+  };
   const userCount = (tid) => (data && data.pub ? data.pub.filter((u) => u.tenant_id === tid).length : 0);
   const setD = (id, k, v) => setDraft((d) => ({ ...d, [id]: { ...d[id], [k]: v } }));
 
@@ -78,7 +90,7 @@ function OperadorInner() {
   return (
     <div style={{ maxWidth: 760, margin: "0 auto", padding: "20px 16px 50px" }}>
       <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 4px" }}>Panel de operador</h1>
-      <p style={{ fontSize: 13, color: MUTED, margin: "0 0 18px" }}>Administración de la plataforma Reko — solo admins.</p>
+      <p style={{ fontSize: 13, color: MUTED, margin: "0 0 18px" }}>Administración de la plataforma Reko — solo admins. Usá <b>Entrar como soporte</b> para ver y operar una tienda; salís desde la barra superior.</p>
       {!data && <p style={{ color: MUTED }}>Cargando…</p>}
 
       {data && (
@@ -119,7 +131,17 @@ function OperadorInner() {
                   </div>
                 </div>
                 <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>{userCount(t.id)} usuarios · {(data.custCounts && data.custCounts[t.id]) || 0} clientes finales · creado {fmtDate(t.created_at)}</div>
-                <button onClick={() => saveTenant(t.id)} style={{ ...btn(GREEN, SLATE), width: "100%", marginTop: 10, padding: 12 }}>Guardar cambios</button>
+                {usersOf(t.id).length > 0 && (
+                  <div style={{ fontSize: 12.5, color: SLATE, marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {usersOf(t.id).map((u) => (
+                      <span key={u.id} style={{ background: "#f3f1ea", borderRadius: 6, padding: "3px 8px" }}>👤 {u.email}</span>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <button onClick={() => saveTenant(t.id)} style={{ ...btn("#fff", SLATE, `1px solid ${LINE}`), flex: 1, padding: 12 }}>Guardar cambios</button>
+                  <button onClick={() => enterSupport(t)} style={{ ...btn(GREEN, SLATE), flex: 1, padding: 12 }}>Entrar como soporte →</button>
+                </div>
               </div>
             );
           })}
