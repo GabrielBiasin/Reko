@@ -12,12 +12,11 @@ const LINE = "#e7e4dd";
 
 const CHANNEL_MAP = { mostrador: "manual", mercadolibre: "mercadolibre", whatsapp: "whatsapp" };
 
-function computeLifeStage(species, age) {
-  const a = parseFloat(age);
-  if (isNaN(a)) return null;
-  if (a < 1) return "puppy";
-  if (species === "cat") return a >= 10 ? "senior" : "adult";
-  return a >= 7 ? "senior" : "adult";
+// Peso representativo por tamaño, para alimentar la predicción (RER) sin pedir el peso exacto.
+function weightFromSize(species, size) {
+  if (!size) return null;
+  if (species === "cat") return size === "small" ? 3 : size === "large" ? 6 : 4.5;
+  return size === "small" ? 7 : size === "large" ? 38 : 20; // perro / otro
 }
 function gramsPerDay(species, weight, lifeStage) {
   const w = parseFloat(weight);
@@ -63,7 +62,7 @@ function CargarInner() {
   const [selectedPetId, setSelectedPetId] = useState(null); // id | "new" | null
 
   // ---- Mascota nueva ----
-  const [mascota, setMascota] = useState({ nombre: "", especie: "dog", peso: "", edad: "", raza: "" });
+  const [mascota, setMascota] = useState({ nombre: "", especie: "dog", etapa: "adult", tamano: "medium", raza: "" });
 
   // ---- Producto ----
   const [productQuery, setProductQuery] = useState("");
@@ -94,7 +93,7 @@ function CargarInner() {
     const phone = normPhone(c.phone_e164);
     let ids = [c.id];
     if (phone) { const { data: rows } = await supabase.from("customers").select("id").eq("phone_e164", c.phone_e164); if (rows && rows.length) ids = rows.map((r) => r.id); }
-    const { data: pets } = await supabase.from("pets").select("id,name,species,weight_kg,life_stage").in("customer_id", ids);
+    const { data: pets } = await supabase.from("pets").select("id,name,species,weight_kg,life_stage,size").in("customer_id", ids);
     setClientPets(pets || []);
     setSelectedPetId((pets && pets.length) ? pets[0].id : "new");
   }
@@ -148,9 +147,9 @@ function CargarInner() {
   const eff = useMemo(() => {
     if (selectedPetId && selectedPetId !== "new") {
       const p = clientPets.find((x) => x.id === selectedPetId);
-      if (p) return { species: p.species, weight: p.weight_kg, lifeStage: p.life_stage };
+      if (p) return { species: p.species, weight: p.weight_kg || weightFromSize(p.species, p.size), lifeStage: p.life_stage };
     }
-    return { species: mascota.especie, weight: parseFloat(mascota.peso) || null, lifeStage: computeLifeStage(mascota.especie, mascota.edad) };
+    return { species: mascota.especie, weight: weightFromSize(mascota.especie, mascota.tamano), lifeStage: mascota.etapa };
   }, [selectedPetId, clientPets, mascota]);
 
   const prediccion = useMemo(() => {
@@ -195,8 +194,8 @@ function CargarInner() {
       // mascota
       let petId = null;
       if (selectedPetId && selectedPetId !== "new") petId = selectedPetId;
-      else if (mascota.nombre || mascota.peso) {
-        const { data: np, error: ep } = await supabase.from("pets").insert({ customer_id: custId, name: mascota.nombre || null, species: mascota.especie, breed: mascota.raza || null, weight_kg: parseFloat(mascota.peso) || null, life_stage: computeLifeStage(mascota.especie, mascota.edad) }).select("id").single();
+      else if (mascota.nombre || mascota.tamano) {
+        const { data: np, error: ep } = await supabase.from("pets").insert({ customer_id: custId, name: mascota.nombre || null, species: mascota.especie, breed: mascota.raza || null, size: mascota.tamano, weight_kg: weightFromSize(mascota.especie, mascota.tamano), life_stage: mascota.etapa }).select("id").single();
         if (ep) throw ep; petId = np.id;
       }
 
@@ -220,7 +219,7 @@ function CargarInner() {
       // reset venta y producto, mantener cliente para cargas seguidas
       setProductQuery(""); setSelectedProduct(null); setPackKg(""); setVenta((v) => ({ ...v, precio: "" }));
       if (!selectedClient) resetClient();
-      setMascota({ nombre: "", especie: "dog", peso: "", edad: "", raza: "" });
+      setMascota({ nombre: "", especie: "dog", etapa: "adult", tamano: "medium", raza: "" });
     } catch (err) {
       setEstado({ guardando: false, ok: false, error: err.message || String(err) });
     }
@@ -307,9 +306,22 @@ function CargarInner() {
           </div>
           <Label>Nombre</Label>
           <input style={inputStyle} value={mascota.nombre} onChange={(e) => setMascota({ ...mascota, nombre: e.target.value })} placeholder="Toto" />
-          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-            <div style={{ flex: 1 }}><Label>Peso (kg)</Label><input style={inputStyle} inputMode="decimal" value={mascota.peso} onChange={(e) => setMascota({ ...mascota, peso: e.target.value })} placeholder="28" /></div>
-            <div style={{ flex: 1 }}><Label>Edad (años)</Label><input style={inputStyle} inputMode="decimal" value={mascota.edad} onChange={(e) => setMascota({ ...mascota, edad: e.target.value })} placeholder="3" /></div>
+          <div style={{ marginTop: 12 }}>
+            <Label>Etapa de vida</Label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Seg value="puppy" current={mascota.etapa} onClick={(v) => setMascota({ ...mascota, etapa: v })}>Cachorro</Seg>
+              <Seg value="adult" current={mascota.etapa} onClick={(v) => setMascota({ ...mascota, etapa: v })}>Adulto</Seg>
+              <Seg value="senior" current={mascota.etapa} onClick={(v) => setMascota({ ...mascota, etapa: v })}>Senior</Seg>
+            </div>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <Label>Tamaño</Label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Seg value="small" current={mascota.tamano} onClick={(v) => setMascota({ ...mascota, tamano: v })}>Pequeño</Seg>
+              <Seg value="medium" current={mascota.tamano} onClick={(v) => setMascota({ ...mascota, tamano: v })}>Mediano</Seg>
+              <Seg value="large" current={mascota.tamano} onClick={(v) => setMascota({ ...mascota, tamano: v })}>Grande</Seg>
+            </div>
+            <div style={{ fontSize: 12, color: MUTED, marginTop: 6 }}>Usamos etapa y tamaño para estimar cuándo se le acaba el alimento.</div>
           </div>
         </Card>
       )}
