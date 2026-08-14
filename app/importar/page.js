@@ -9,7 +9,7 @@ const SLATE = "#1c2530";
 const MUTED = "#7c8278";
 const LINE = "#e7e4dd";
 
-const COLS = ["telefono", "nombre", "direccion", "cp", "mascota", "especie", "peso_kg", "edad", "producto", "pack_kg", "precio", "fecha"];
+const COLS = ["telefono", "nombre", "direccion", "cp", "barrio", "mascota", "especie", "peso_kg", "edad", "producto", "pack_kg", "precio", "fecha"];
 const CAT_COLS = ["producto", "tipo", "especie", "pack_kg", "precio"];
 const CHANNELS = [["manual", "Mostrador"], ["mercadolibre", "MercadoLibre"], ["whatsapp", "WhatsApp"]];
 function mapSpeciesCat(s) { const v = (s || "").toLowerCase(); if (v === "dog" || v === "perro") return "dog"; if (v === "cat" || v === "gato") return "cat"; return v ? "other" : null; }
@@ -112,9 +112,17 @@ function ImportarInner() {
         let cid = phoneCache[phone];
         if (!cid) {
           const ex = await supabase.from("customers").select("id").eq("phone_e164", phone).limit(1).maybeSingle();
-          if (ex.data) cid = ex.data.id;
-          else {
-            const c = await supabase.from("customers").insert({ name: r.nombre || null, phone_e164: phone, channel_origin: "csv", lifecycle_stage: "active", address_full: r.direccion || null, postal_code: r.cp || null }).select("id").single();
+          if (ex.data) {
+            cid = ex.data.id;
+            // Bug corregido: antes, si el cliente ya existía, la dirección/CP/barrio del CSV se descartaban.
+            // Ahora, si la fila trae el dato, se actualiza el perfil del cliente con lo más reciente.
+            const patch = {};
+            if (r.direccion) patch.address_full = r.direccion;
+            if (r.cp) patch.postal_code = r.cp;
+            if (r.barrio) patch.barrio = r.barrio;
+            if (Object.keys(patch).length) await supabase.from("customers").update(patch).eq("id", cid);
+          } else {
+            const c = await supabase.from("customers").insert({ name: r.nombre || null, phone_e164: phone, channel_origin: "csv", lifecycle_stage: "active", address_full: r.direccion || null, postal_code: r.cp || null, barrio: r.barrio || null }).select("id").single();
             if (c.error) throw c.error;
             cid = c.data.id;
           }
@@ -131,7 +139,7 @@ function ImportarInner() {
         }
         let when = new Date();
         if (r.fecha) { const d = new Date(r.fecha); if (!isNaN(d.getTime())) when = d; }
-        const o = await supabase.from("orders").insert({ customer_id: cid, channel: "csv", total: num(r.precio) || 0, status: "paid", ordered_at: when.toISOString(), delivery_address: r.direccion || null, delivery_postal_code: r.cp || null }).select("id").single();
+        const o = await supabase.from("orders").insert({ customer_id: cid, channel: "csv", total: num(r.precio) || 0, status: "paid", ordered_at: when.toISOString(), delivery_address: r.direccion || null, delivery_postal_code: r.cp || null, delivery_barrio: r.barrio || null }).select("id").single();
         if (o.error) throw o.error;
         if (pid) {
           await supabase.from("order_items").insert({ order_id: o.data.id, product_id: pid, qty: 1, unit_price: num(r.precio), net_weight_g_snapshot: isFood ? Math.round(num(r.pack_kg) * 1000) : null });
@@ -146,7 +154,7 @@ function ImportarInner() {
   }
 
   function downloadTemplate() {
-    const csv = COLS.join(",") + "\n" + "+5491155550000,Maria Gonzalez,Av. Cazon 1234 Tigre,1648,Toto,perro,28,3,Royal Canin Maxi,15,28000,2026-05-01\n";
+    const csv = COLS.join(",") + "\n" + "+5491155550000,Maria Gonzalez,Av. Cazon 1234 Tigre,1648,Tigre Centro,Toto,perro,28,3,Royal Canin Maxi,15,28000,2026-05-01\n";
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = "plantilla-reko.csv"; a.click(); URL.revokeObjectURL(url);

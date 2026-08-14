@@ -28,8 +28,8 @@ function Dashboard() {
     try {
       const soon = new Date(); soon.setDate(soon.getDate() + 7);
       const [os, cs, preds, prods, pets, ois, tn] = await Promise.all([
-        supabase.from("orders").select("id,customer_id,channel,total,ordered_at,delivery_postal_code"),
-        supabase.from("customers").select("id,name,phone_e164,postal_code"),
+        supabase.from("orders").select("id,customer_id,channel,total,ordered_at,delivery_postal_code,delivery_barrio"),
+        supabase.from("customers").select("id,name,phone_e164,postal_code,barrio"),
         supabase.from("repurchase_predictions").select("id,customer_id,pet_id,product_id,predicted_runout_date,status").eq("status", "pending").lte("predicted_runout_date", soon.toISOString().slice(0, 10)).order("predicted_runout_date"),
         supabase.from("products").select("id,name,is_consumable"),
         supabase.from("pets").select("id,customer_id,name"),
@@ -98,19 +98,26 @@ function Dashboard() {
       });
       crossSell.sort((a, b) => (b.loyal ? 1 : 0) - (a.loyal ? 1 : 0));
 
-      // Zonas por código postal (clientes y ventas)
+      // Zonas: agrupamos por barrio (más legible); si falta, caemos al CP; si no hay ninguno, "Sin dato".
+      function zoneKeyOf(barrio, cp) {
+        const b = (barrio || "").trim();
+        if (b) return b;
+        const c = (cp || "").trim();
+        if (c) return "CP " + c;
+        return "Sin dato";
+      }
       const zones = {};
       customers.forEach((c) => {
-        const cp = (c.postal_code || "").trim() || "Sin CP";
-        if (!zones[cp]) zones[cp] = { customers: 0, orders: 0, total: 0 };
-        zones[cp].customers += 1;
+        const key = zoneKeyOf(c.barrio, c.postal_code);
+        if (!zones[key]) zones[key] = { customers: 0, orders: 0, total: 0 };
+        zones[key].customers += 1;
       });
       orders.forEach((o) => {
         const c = custById[o.customer_id];
-        const cp = (o.delivery_postal_code || (c && c.postal_code) || "").trim() || "Sin CP";
-        if (!zones[cp]) zones[cp] = { customers: 0, orders: 0, total: 0 };
-        zones[cp].orders += 1;
-        zones[cp].total += Number(o.total) || 0;
+        const key = zoneKeyOf(o.delivery_barrio || (c && c.barrio), o.delivery_postal_code || (c && c.postal_code));
+        if (!zones[key]) zones[key] = { customers: 0, orders: 0, total: 0 };
+        zones[key].orders += 1;
+        zones[key].total += Number(o.total) || 0;
       });
       const zoneList = Object.entries(zones).map(([cp, v]) => ({ cp, ...v })).sort((a, b) => b.customers - a.customers);
 
@@ -204,14 +211,14 @@ function Dashboard() {
 
           {/* Zonas */}
           <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16, marginBottom: 16 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: SLATE, marginBottom: 10 }}>📍 Zonas (por código postal)</div>
-            {(!data.zoneList || !data.zoneList.length) && <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Cargá direcciones con CP en tus clientes para ver qué zonas tenés más cubiertas.</p>}
+            <div style={{ fontSize: 15, fontWeight: 800, color: SLATE, marginBottom: 10 }}>📍 Zonas (por barrio / CP)</div>
+            {(!data.zoneList || !data.zoneList.length) && <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Cargá barrio y CP en tus clientes para ver qué zonas tenés más cubiertas.</p>}
             {(data.zoneList || []).slice(0, 10).map((z) => {
               const pct = data.customers ? Math.round((z.customers / data.customers) * 100) : 0;
               return (
                 <div key={z.cp} style={{ padding: "9px 0", borderBottom: `1px solid ${LINE}` }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 14 }}>
-                    <span style={{ fontWeight: 700, color: z.cp === "Sin CP" ? MUTED : SLATE }}>{z.cp === "Sin CP" ? "Sin CP" : "CP " + z.cp}</span>
+                    <span style={{ fontWeight: 700, color: z.cp === "Sin dato" ? MUTED : SLATE }}>{z.cp}</span>
                     <span style={{ fontWeight: 800, color: GREEN_DK }}>{pct}%</span>
                   </div>
                   <div style={{ height: 8, background: "#f1ede3", borderRadius: 5, overflow: "hidden", margin: "5px 0 4px" }}>
