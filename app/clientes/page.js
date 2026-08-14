@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
+import { barrioFromCP } from "@/lib/cpBarrios";
 
 const GREEN = "#FFB63C";
 const GREEN_DK = "#c77f00";
@@ -102,7 +103,7 @@ function ClientesInner() {
                     <span style={{ fontSize: 16, fontWeight: 700, color: SLATE }}>{c.name || "Sin nombre"}</span>
                     <span style={{ fontSize: 14, fontWeight: 700, color: GREEN_DK }}>{money(c.total)}</span>
                   </div>
-                  <div style={{ fontSize: 13, color: MUTED, marginTop: 2 }}>{c.phone}{c.addr ? " · " + c.addr : ""}{c.cp ? " · CP " + c.cp : ""}{c.barrio ? " · " + c.barrio : ""}</div>
+                  <div style={{ fontSize: 13, color: MUTED, marginTop: 2 }}>{c.phone}{c.addr ? " · " + c.addr : ""}{(c.barrio || barrioFromCP(c.cp)) ? " · " + (c.barrio || barrioFromCP(c.cp)) : ""}</div>
                   <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 12.5, color: MUTED }}>
                     <span>🐾 {c.pets.length}</span>
                     <span>🛒 {c.orders.length}</span>

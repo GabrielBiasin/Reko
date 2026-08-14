@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
 import { CATALOG } from "@/lib/catalog";
+import { barrioFromCP } from "@/lib/cpBarrios";
 
 const GREEN = "#FFB63C";
 const GREEN_DK = "#c77f00";
@@ -264,7 +265,7 @@ function CargarInner() {
         {selectedClient && (
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fdf6e9", border: `1px solid ${LINE}`, borderRadius: 11, padding: "11px 13px" }}>
-              <div><div style={{ fontWeight: 700 }}>{selectedClient.name || "Sin nombre"}</div><div style={{ fontSize: 13, color: MUTED }}>{selectedClient.phone_e164}</div>{selectedClient.address_full && <div style={{ fontSize: 12.5, color: MUTED }}>{selectedClient.address_full}{selectedClient.postal_code ? " · CP " + selectedClient.postal_code : ""}{selectedClient.barrio ? " · " + selectedClient.barrio : ""}</div>}</div>
+              <div><div style={{ fontWeight: 700 }}>{selectedClient.name || "Sin nombre"}</div><div style={{ fontSize: 13, color: MUTED }}>{selectedClient.phone_e164}</div>{selectedClient.address_full && <div style={{ fontSize: 12.5, color: MUTED }}>{selectedClient.address_full}{(selectedClient.barrio || barrioFromCP(selectedClient.postal_code)) ? " · " + (selectedClient.barrio || barrioFromCP(selectedClient.postal_code)) : ""}</div>}</div>
               <button onClick={resetClient} style={{ width: "auto", margin: 0, padding: "6px 10px", fontSize: 13, color: MUTED, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, cursor: "pointer" }}>Cambiar</button>
             </div>
             <div style={{ marginTop: 12 }}>

@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
+import { barrioFromCP } from "@/lib/cpBarrios";
 
 const GREEN = "#FFB63C";
 const GREEN_DK = "#c77f00";
@@ -98,12 +99,13 @@ function Dashboard() {
       });
       crossSell.sort((a, b) => (b.loyal ? 1 : 0) - (a.loyal ? 1 : 0));
 
-      // Zonas: agrupamos por barrio (más legible); si falta, caemos al CP; si no hay ninguno, "Sin dato".
+      // Zonas: siempre mostramos el NOMBRE del barrio, nunca el CP crudo.
+      // Prioridad: barrio cargado a mano > barrio derivado del CP (CABA) > "Sin dato".
       function zoneKeyOf(barrio, cp) {
         const b = (barrio || "").trim();
         if (b) return b;
-        const c = (cp || "").trim();
-        if (c) return "CP " + c;
+        const derived = barrioFromCP(cp);
+        if (derived) return derived;
         return "Sin dato";
       }
       const zones = {};
