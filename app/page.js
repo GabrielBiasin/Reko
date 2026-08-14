@@ -20,6 +20,13 @@ function waPhone(p) {
   return d;
 }
 
+// Valida que haya un número real para contactar (no vacío, no "Sin datos", con suficientes dígitos).
+function hasValidPhone(p) {
+  if (!p) return false;
+  const digits = p.replace(/[^0-9]/g, "");
+  return digits.length >= 10;
+}
+
 function Dashboard() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
@@ -92,12 +99,17 @@ function Dashboard() {
         if (pr.is_consumable) mix[cid].food += 1; else mix[cid].acc += 1;
       });
       const petByCust = {}; (pets.data || []).forEach((p) => { if (!petByCust[p.customer_id]) petByCust[p.customer_id] = p; });
+      // Umbral mínimo de items comprados para entrar en cross-selling: filtra compradores ocasionales
+      // (una sola compra chica) que no vale la pena perseguir y agrandan la lista sin sentido.
+      const CROSS_SELL_MIN_ITEMS = 3;
       const crossSell = [];
       Object.entries(mix).forEach(([cid, m]) => {
-        if (m.food > 0 && m.acc === 0) crossSell.push({ id: cid, dir: "acc", customer: (custById[cid] || {}).name || "Cliente", phone: (custById[cid] || {}).phone_e164 || "", pet: (petByCust[cid] || {}).name || "tu mascota", loyal: (byCust[cid] || []).length > 1 });
-        else if (m.acc > 0 && m.food === 0) crossSell.push({ id: cid, dir: "food", customer: (custById[cid] || {}).name || "Cliente", phone: (custById[cid] || {}).phone_e164 || "", pet: (petByCust[cid] || {}).name || "tu mascota", loyal: (byCust[cid] || []).length > 1 });
+        const totalItems = m.food + m.acc;
+        if (totalItems < CROSS_SELL_MIN_ITEMS) return;
+        if (m.food > 0 && m.acc === 0) crossSell.push({ id: cid, dir: "acc", customer: (custById[cid] || {}).name || "Cliente", phone: (custById[cid] || {}).phone_e164 || "", pet: (petByCust[cid] || {}).name || "tu mascota", loyal: (byCust[cid] || []).length > 1, items: totalItems });
+        else if (m.acc > 0 && m.food === 0) crossSell.push({ id: cid, dir: "food", customer: (custById[cid] || {}).name || "Cliente", phone: (custById[cid] || {}).phone_e164 || "", pet: (petByCust[cid] || {}).name || "tu mascota", loyal: (byCust[cid] || []).length > 1, items: totalItems });
       });
-      crossSell.sort((a, b) => (b.loyal ? 1 : 0) - (a.loyal ? 1 : 0));
+      crossSell.sort((a, b) => (b.loyal ? 1 : 0) - (a.loyal ? 1 : 0) || b.items - a.items);
 
       // Zonas: siempre mostramos el NOMBRE del barrio, nunca el CP crudo.
       // Prioridad: barrio cargado a mano > barrio derivado del CP (CABA) > "Sin dato".
@@ -176,9 +188,15 @@ function Dashboard() {
                     {a.days < 0 ? `se le acabó hace ${-a.days} d` : a.days === 0 ? "se le acaba hoy" : `se le acaba en ${a.days} d`}
                   </div>
                 </div>
-                <button onClick={() => contacted(a)} style={{ width: "auto", padding: "10px 14px", fontSize: 13.5, fontWeight: 700, color: "#fff", background: "#25D366", border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
-                  WhatsApp →
-                </button>
+                {hasValidPhone(a.phone) ? (
+                  <button onClick={() => contacted(a)} style={{ width: "auto", padding: "10px 14px", fontSize: 13.5, fontWeight: 700, color: "#fff", background: "#25D366", border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
+                    WhatsApp →
+                  </button>
+                ) : (
+                  <span style={{ width: "auto", padding: "10px 14px", fontSize: 12.5, fontWeight: 700, color: "#b04b3f", background: "#fbe9e6", borderRadius: 10, whiteSpace: "nowrap" }}>
+                    Sin número registrado
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -189,16 +207,22 @@ function Dashboard() {
               <span style={{ fontSize: 15, fontWeight: 800, color: SLATE }}>🧲 Cross-selling</span>
               <span style={{ fontSize: 12.5, color: MUTED }}>{data.crossSell.length} oportunidades</span>
             </div>
-            {!data.crossSell.length && <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Sin oportunidades por ahora. Acá aparecen clientes que solo compran alimento (para ofrecerles accesorios) o solo accesorios (para sumarlos al alimento).</p>}
+            {!data.crossSell.length && <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Sin oportunidades por ahora. Acá aparecen clientes con al menos 3 compras que solo llevan alimento (para ofrecerles accesorios) o solo accesorios (para sumarlos al alimento).</p>}
             {data.crossSell.map((x) => (
               <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${LINE}` }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14.5, fontWeight: 700, color: SLATE }}>{x.customer}{x.loyal && <span style={{ fontSize: 11, fontWeight: 700, color: GREEN_DK, background: "#fdf3e0", borderRadius: 6, padding: "2px 7px", marginLeft: 7 }}>cliente fiel</span>}</div>
-                  <div style={{ fontSize: 12.5, color: MUTED }}>{x.dir === "acc" ? "Solo compra alimento → ofrecer accesorios" : "Solo compra accesorios → ofrecer alimento"}</div>
+                  <div style={{ fontSize: 12.5, color: MUTED }}>{x.dir === "acc" ? "Solo compra alimento" : "Solo compra accesorios"} · {x.items} ítems{x.dir === "acc" ? " → ofrecer accesorios" : " → ofrecer alimento"}</div>
                 </div>
-                <button onClick={() => crossCTA(x)} style={{ width: "auto", padding: "10px 14px", fontSize: 13.5, fontWeight: 700, color: "#fff", background: "#25D366", border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
-                  WhatsApp →
-                </button>
+                {hasValidPhone(x.phone) ? (
+                  <button onClick={() => crossCTA(x)} style={{ width: "auto", padding: "10px 14px", fontSize: 13.5, fontWeight: 700, color: "#fff", background: "#25D366", border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
+                    WhatsApp →
+                  </button>
+                ) : (
+                  <span style={{ width: "auto", padding: "10px 14px", fontSize: 12.5, fontWeight: 700, color: "#b04b3f", background: "#fbe9e6", borderRadius: 10, whiteSpace: "nowrap" }}>
+                    Sin número registrado
+                  </span>
+                )}
               </div>
             ))}
           </div>
