@@ -104,6 +104,7 @@ function ImportarInner() {
     setBusy(true); setStatus("Importando…"); setProgress(0);
     let ok = 0, err = 0;
     const phoneCache = {};
+    const productCache = {};
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       try {
@@ -131,8 +132,23 @@ function ImportarInner() {
         let pid = null;
         const isFood = !!r.pack_kg;
         if (r.producto) {
-          const pr = await supabase.from("products").insert({ name: r.producto, species: r.especie ? mapSpecies(r.especie) : null, net_weight_g: isFood ? Math.round(num(r.pack_kg) * 1000) : null, is_consumable: isFood, price: num(r.precio) }).select("id").single();
-          if (!pr.error) pid = pr.data.id;
+          const prodName = r.producto.trim();
+          const cacheKey = prodName.toLowerCase();
+          if (productCache[cacheKey]) {
+            pid = productCache[cacheKey];
+          } else {
+            // Bug corregido: antes se insertaba un producto nuevo por cada fila del CSV,
+            // aunque el mismo producto ya existiera (por importaciones repetidas o filas duplicadas).
+            // Ahora se busca primero por nombre (case-insensitive, match exacto) y se reutiliza si existe.
+            const exProd = await supabase.from("products").select("id").ilike("name", prodName).limit(1).maybeSingle();
+            if (exProd.data) {
+              pid = exProd.data.id;
+            } else {
+              const pr = await supabase.from("products").insert({ name: prodName, species: r.especie ? mapSpecies(r.especie) : null, net_weight_g: isFood ? Math.round(num(r.pack_kg) * 1000) : null, is_consumable: isFood, price: num(r.precio) }).select("id").single();
+              if (!pr.error) pid = pr.data.id;
+            }
+            if (pid) productCache[cacheKey] = pid;
+          }
         }
         if (r.mascota) {
           await supabase.from("pets").insert({ customer_id: cid, name: r.mascota, species: mapSpecies(r.especie), weight_kg: num(r.peso_kg) });
