@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
 import { barrioFromCP } from "@/lib/cpBarrios";
@@ -22,6 +22,9 @@ function ClientesInner() {
   const [editingKey, setEditingKey] = useState(null);
   const [draft, setDraft] = useState({});
   const [saving, setSaving] = useState(false);
+  const [q, setQ] = useState("");
+  const [barrioFilter, setBarrioFilter] = useState("");
+  const [sortBy, setSortBy] = useState("total");
 
   async function load() {
     try {
@@ -92,10 +95,10 @@ function ClientesInner() {
   }
 
   function exportCSV() {
-    if (!clients || !clients.length) return;
+    if (!filtered || !filtered.length) return;
     const header = ["nombre", "telefono", "direccion", "cp", "barrio", "mascotas", "compras", "total_gastado", "pct_alimento", "ultima_compra"];
     const rows = [header];
-    clients.forEach((c) => {
+    filtered.forEach((c) => {
       const tot = c.food + c.acc; const pct = tot ? Math.round((c.food / tot) * 100) : 0;
       rows.push([c.name, c.phone, c.addr, c.cp, c.barrio, c.pets.length, c.orders.length, c.total, pct + "%", c.last ? c.last.slice(0, 10) : ""]);
     });
@@ -103,6 +106,40 @@ function ClientesInner() {
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "clientes-reko.csv"; a.click(); URL.revokeObjectURL(url);
   }
+
+  // Barrios únicos presentes en la base (con fallback a CP), para poblar el filtro.
+  const barrios = useMemo(() => {
+    if (!clients) return [];
+    const set = new Set();
+    clients.forEach((c) => { const b = c.barrio || barrioFromCP(c.cp); if (b) set.add(b); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "es"));
+  }, [clients]);
+
+  // Búsqueda por nombre / teléfono / dirección + filtro por barrio + orden, todo client-side sobre la lista ya unificada.
+  const filtered = useMemo(() => {
+    if (!clients) return [];
+    const term = q.trim().toLowerCase();
+    let list = clients.filter((c) => {
+      if (barrioFilter) {
+        const b = c.barrio || barrioFromCP(c.cp);
+        if (b !== barrioFilter) return false;
+      }
+      if (!term) return true;
+      const haystack = [c.name, c.phone, c.addr, c.barrio].filter(Boolean).join(" ").toLowerCase();
+      return haystack.includes(term);
+    });
+    list = [...list].sort((a, b) => {
+      if (sortBy === "total") return b.total - a.total;
+      if (sortBy === "recientes") return (b.last || "").localeCompare(a.last || "");
+      if (sortBy === "nombre") return (a.name || "").localeCompare(b.name || "", "es");
+      if (sortBy === "compras") return b.orders.length - a.orders.length;
+      return 0;
+    });
+    return list;
+  }, [clients, q, barrioFilter, sortBy]);
+
+  const searchInput = { flex: 1, border: `1px solid ${LINE}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, color: SLATE, background: "#fff", outline: "none" };
+  const selectInput = { border: `1px solid ${LINE}`, borderRadius: 10, padding: "10px 10px", fontSize: 13.5, color: SLATE, background: "#fff", outline: "none" };
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 16px 50px" }}>
@@ -117,12 +154,51 @@ function ClientesInner() {
 
       {clients && (
         <>
-          <button onClick={exportCSV} disabled={!clients.length} style={{ width: "100%", padding: "11px", fontSize: 14, fontWeight: 700, color: SLATE, background: clients.length ? GREEN : "#c2c8bd", border: "none", borderRadius: 11, cursor: clients.length ? "pointer" : "default", marginBottom: 14 }}>
-            Exportar CSV ({clients.length})
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscar por nombre, teléfono o dirección…"
+              style={searchInput}
+            />
+            {q && (
+              <button onClick={() => setQ("")} style={{ padding: "0 12px", fontSize: 13, fontWeight: 600, color: MUTED, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 10, cursor: "pointer" }}>
+                ✕
+              </button>
+            )}
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+            <select value={barrioFilter} onChange={(e) => setBarrioFilter(e.target.value)} style={{ ...selectInput, flex: "1 1 160px" }}>
+              <option value="">Todos los barrios</option>
+              {barrios.map((b) => <option key={b} value={b}>{b}</option>)}
+            </select>
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ ...selectInput, flex: "1 1 160px" }}>
+              <option value="total">Ordenar: más gastado</option>
+              <option value="recientes">Ordenar: compra más reciente</option>
+              <option value="compras">Ordenar: más compras</option>
+              <option value="nombre">Ordenar: nombre (A-Z)</option>
+            </select>
+          </div>
+
+          {(q || barrioFilter) && (
+            <p style={{ fontSize: 12.5, color: MUTED, margin: "-6px 0 12px" }}>
+              {filtered.length} de {clients.length} clientes
+              {barrioFilter ? " · " + barrioFilter : ""}
+              {" "}
+              <span onClick={() => { setQ(""); setBarrioFilter(""); }} style={{ color: GREEN_DK, fontWeight: 700, cursor: "pointer" }}>
+                Limpiar filtros
+              </span>
+            </p>
+          )}
+
+          <button onClick={exportCSV} disabled={!filtered.length} style={{ width: "100%", padding: "11px", fontSize: 14, fontWeight: 700, color: SLATE, background: filtered.length ? GREEN : "#c2c8bd", border: "none", borderRadius: 11, cursor: filtered.length ? "pointer" : "default", marginBottom: 14 }}>
+            Exportar CSV ({filtered.length})
           </button>
           {!clients.length && <p style={{ color: MUTED }}>Todavía no hay clientes. Cargá una venta o importá historial.</p>}
+          {clients.length > 0 && !filtered.length && <p style={{ color: MUTED }}>Ningún cliente coincide con la búsqueda o el filtro.</p>}
 
-          {clients.map((c) => {
+          {filtered.map((c) => {
             const tot = c.food + c.acc; const pct = tot ? Math.round((c.food / tot) * 100) : 0;
             const isOpen = open === c.key;
             const isEditing = editingKey === c.key;
