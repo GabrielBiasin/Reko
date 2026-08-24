@@ -51,6 +51,19 @@ function OperadorInner() {
     const r = await api("create_tenant", { name });
     if (r.error) alert(r.error); else load();
   }
+  async function deleteTenant(t) {
+    const uc = userCount(t.id);
+    const cc = (data.custCounts && data.custCounts[t.id]) || 0;
+    const warn = "Vas a eliminar \"" + t.name + "\" de forma PERMANENTE.\n\nEsto borra para siempre: " + cc + " clientes finales, todas sus ventas, mascotas y productos, y revoca el acceso a " + uc + " usuario(s) de esa tienda.\n\nNo se puede deshacer.\n\nPara confirmar, escribí el nombre exacto de la tienda:";
+    const typed = prompt(warn);
+    if (typed === null) return;
+    if (typed.trim().toLowerCase() !== (t.name || "").trim().toLowerCase()) {
+      alert("El nombre no coincide. No se eliminó nada.");
+      return;
+    }
+    const r = await api("delete_tenant", { id: t.id, confirm_name: typed });
+    if (r.error) alert(r.error); else load();
+  }
   async function ban(u) {
     const r = await api("ban_user", { user_id: u.id, ban: !u.banned });
     if (r.error) alert(r.error); else load();
@@ -142,6 +155,7 @@ function OperadorInner() {
                   <button onClick={() => saveTenant(t.id)} style={{ ...btn("#fff", SLATE, `1px solid ${LINE}`), flex: 1, padding: 12 }}>Guardar cambios</button>
                   <button onClick={() => enterSupport(t)} style={{ ...btn(GREEN, SLATE), flex: 1, padding: 12 }}>Entrar como soporte →</button>
                 </div>
+                <button onClick={() => deleteTenant(t)} style={{ ...btn("#fff", "#b04b3f", "1px solid #e0b4ad"), width: "100%", marginTop: 8, padding: 10 }}>Eliminar tienda</button>
               </div>
             );
           })}

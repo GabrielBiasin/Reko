@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
 
@@ -50,6 +51,28 @@ function mapSpecies(s) {
 }
 function num(v) { const n = parseFloat(v); return isNaN(n) ? null : n; }
 
+// Detecta teléfonos/números corrompidos por Excel (ej: "5,41126E+11" en vez del número real).
+// Pasa esto cuando una celda numérica larga no tenía formato de Texto — el dato ya se perdió
+// de forma irrecuperable, así que lo salteamos en vez de guardar basura.
+function isCorruptedNumber(v) { return /^\d[.,]\d+e\+\d+$/i.test((v || "").trim()); }
+
+// Lee un archivo .xlsx/.xls y lo devuelve en el mismo formato que parseCSV: un array de objetos
+// con claves en minúscula (nombre de columna) y valores de texto ya recortados.
+// raw:false hace que XLSX devuelva cada celda "como se ve" en Excel — así detectamos igual
+// si una celda ya quedó corrompida en notación científica antes de subir el archivo.
+function parseXLSX(arrayBuffer) {
+  const wb = XLSX.read(arrayBuffer, { type: "array" });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const json = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
+  return json
+    .filter((row) => Object.values(row).some((v) => String(v).trim()))
+    .map((row) => {
+      const o = {};
+      Object.keys(row).forEach((k) => { o[k.trim().toLowerCase()] = String(row[k] == null ? "" : row[k]).trim(); });
+      return o;
+    });
+}
+
 function ImportarInner() {
   const [rows, setRows] = useState(null);
   const [status, setStatus] = useState("");
@@ -61,15 +84,18 @@ function ImportarInner() {
   function onFile(e) {
     const f = e.target.files[0];
     if (!f) return;
+    const name = (f.name || "").toLowerCase();
+    const isExcel = name.endsWith(".xlsx") || name.endsWith(".xls") || f.type.indexOf("spreadsheet") >= 0 || f.type === "application/vnd.ms-excel";
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const parsed = parseCSV(String(reader.result));
+        const parsed = isExcel ? parseXLSX(reader.result) : parseCSV(String(reader.result));
+        const corrupted = parsed.filter((r) => r.telefono && isCorruptedNumber(r.telefono)).length;
         setRows(parsed);
-        setStatus(parsed.length + " filas leídas. Revisá y confirmá la importación.");
+        setStatus(parsed.length + " filas leídas." + (corrupted ? " ⚠ " + corrupted + " tienen el teléfono dañado (notación científica de Excel) y se van a saltear al importar." : "") + " Revisá y confirmá la importación.");
       } catch (err) { setStatus("No pude leer el archivo: " + err.message); }
     };
-    reader.readAsText(f);
+    if (isExcel) reader.readAsArrayBuffer(f); else reader.readAsText(f);
   }
 
   async function doImportCatalog() {
@@ -109,7 +135,7 @@ function ImportarInner() {
       const r = rows[i];
       try {
         const phone = (r.telefono || "").trim();
-        if (!phone) { err++; setProgress(Math.round(((i + 1) / rows.length) * 100)); continue; }
+        if (!phone || isCorruptedNumber(phone)) { err++; setProgress(Math.round(((i + 1) / rows.length) * 100)); continue; }
         let cid = phoneCache[phone];
         if (!cid) {
           const ex = await supabase.from("customers").select("id").eq("phone_e164", phone).limit(1).maybeSingle();
@@ -176,6 +202,24 @@ function ImportarInner() {
     const a = document.createElement("a"); a.href = url; a.download = "plantilla-reko.csv"; a.click(); URL.revokeObjectURL(url);
   }
 
+  // Plantilla en Excel con la columna "telefono" forzada a formato Texto (código '@').
+  // Así Excel nunca la convierte a notación científica, ni al completarla ni al reabrirla —
+  // el problema que rompió teléfonos en una importación anterior no puede volver a pasar con esta plantilla.
+  function downloadTemplateXLSX() {
+    const example = ["+5491155550000", "Maria Gonzalez", "Av. Cazon 1234 Tigre", "1648", "Tigre Centro", "Toto", "perro", "28", "3", "Royal Canin Maxi", "15", "28000", "2026-05-01"];
+    const ws = XLSX.utils.aoa_to_sheet([COLS, example]);
+    const phoneCol = COLS.indexOf("telefono");
+    for (let r = 1; r <= 500; r++) {
+      const addr = XLSX.utils.encode_cell({ r, c: phoneCol });
+      if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+      ws[addr].z = "@";
+      ws[addr].t = "s";
+    }
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Historial");
+    XLSX.writeFile(wb, "plantilla-reko.xlsx");
+  }
+
   const box = { background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 16, marginBottom: 14 };
 
   return (
@@ -185,7 +229,7 @@ function ImportarInner() {
         <button onClick={() => { setMode("historial"); setRows(null); setStatus(""); }} style={{ flex: 1, padding: "11px", fontSize: 14, fontWeight: 700, border: `1px solid ${mode === "historial" ? GREEN : LINE}`, background: mode === "historial" ? GREEN : "#fff", color: SLATE, borderRadius: 11, cursor: "pointer" }}>Historial de ventas</button>
         <button onClick={() => { setMode("catalogo"); setRows(null); setStatus(""); }} style={{ flex: 1, padding: "11px", fontSize: 14, fontWeight: 700, border: `1px solid ${mode === "catalogo" ? GREEN : LINE}`, background: mode === "catalogo" ? GREEN : "#fff", color: SLATE, borderRadius: 11, cursor: "pointer" }}>Catálogo de productos</button>
       </div>
-      <p style={{ fontSize: 13, color: MUTED, margin: "0 0 16px" }}>{mode === "historial" ? "Cargá un CSV con ventas pasadas. Los clientes se unifican por teléfono automáticamente." : "Cargá tu lista de productos por canal, así el autocompletado al cargar ventas ya filtra producto, presentación y precio según el canal."}</p>
+      <p style={{ fontSize: 13, color: MUTED, margin: "0 0 16px" }}>{mode === "historial" ? "Cargá un CSV o Excel con ventas pasadas. Los clientes se unifican por teléfono automáticamente." : "Cargá tu lista de productos por canal (CSV o Excel), así el autocompletado al cargar ventas ya filtra producto, presentación y precio según el canal."}</p>
 
       <div style={box}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>1. Formato del archivo</div>
@@ -209,12 +253,19 @@ function ImportarInner() {
             </div>
           </>
         )}
-        <button onClick={mode === "historial" ? downloadTemplate : downloadCatTemplate} style={{ width: "auto", padding: "9px 14px", fontSize: 13, fontWeight: 600, color: SLATE, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 10, cursor: "pointer" }}>Descargar plantilla</button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button onClick={mode === "historial" ? downloadTemplate : downloadCatTemplate} style={{ width: "auto", padding: "9px 14px", fontSize: 13, fontWeight: 600, color: SLATE, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 10, cursor: "pointer" }}>Descargar plantilla (CSV)</button>
+          {mode === "historial" && (
+            <button onClick={downloadTemplateXLSX} style={{ width: "auto", padding: "9px 14px", fontSize: 13, fontWeight: 600, color: SLATE, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 10, cursor: "pointer" }}>Descargar plantilla (Excel)</button>
+          )}
+        </div>
+        {mode === "historial" && <p style={{ fontSize: 11.5, color: MUTED, margin: "8px 0 0" }}>Tip: la plantilla Excel trae la columna teléfono ya formateada como texto, para que nunca se convierta en notación científica (ej. 5,41E+11) al completarla.</p>}
       </div>
 
       <div style={box}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>2. Subir archivo</div>
-        <input type="file" accept=".csv,text/csv" onChange={onFile} style={{ fontSize: 14 }} />
+        <input type="file" accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onChange={onFile} style={{ fontSize: 14 }} />
+        <p style={{ fontSize: 11.5, color: MUTED, margin: "8px 0 0" }}>Formatos aceptados: .csv, .xlsx, .xls</p>
       </div>
 
       {rows && (
