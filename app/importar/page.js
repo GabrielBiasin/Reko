@@ -128,9 +128,10 @@ function ImportarInner() {
   async function doImport() {
     if (!rows || !rows.length) return;
     setBusy(true); setStatus("Importando…"); setProgress(0);
-    let ok = 0, err = 0;
+    let ok = 0, err = 0, dupOrders = 0, dupPets = 0;
     const phoneCache = {};
     const productCache = {};
+    const petCache = {};
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       try {
@@ -177,11 +178,28 @@ function ImportarInner() {
           }
         }
         if (r.mascota) {
-          await supabase.from("pets").insert({ customer_id: cid, name: r.mascota, species: mapSpecies(r.especie), weight_kg: num(r.peso_kg) });
+          const petName = r.mascota.trim();
+          const petKey = cid + "|" + petName.toLowerCase();
+          if (!petCache[petKey]) {
+            // Evita duplicar la misma mascota si el cliente reimporta un archivo que se solapa
+            // con datos ya cargados: busca por cliente+nombre antes de crear una nueva.
+            const exPet = await supabase.from("pets").select("id").eq("customer_id", cid).ilike("name", petName).limit(1).maybeSingle();
+            if (exPet.data) { dupPets++; } else { await supabase.from("pets").insert({ customer_id: cid, name: petName, species: mapSpecies(r.especie), weight_kg: num(r.peso_kg) }); }
+            petCache[petKey] = true;
+          }
         }
         let when = new Date();
         if (r.fecha) { const d = new Date(r.fecha); if (!isNaN(d.getTime())) when = d; }
-        const o = await supabase.from("orders").insert({ customer_id: cid, channel: "csv", total: num(r.precio) || 0, status: "paid", ordered_at: when.toISOString(), delivery_address: r.direccion || null, delivery_postal_code: r.cp || null, delivery_barrio: r.barrio || null }).select("id").single();
+
+        // Evita duplicar la misma venta si el archivo se solapa con ventas ya importadas antes:
+        // mismo cliente + mismo día + mismo total ya cuenta como "es la misma compra".
+        const dayStart = new Date(when); dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
+        const total = num(r.precio) || 0;
+        const dupCheck = await supabase.from("orders").select("id").eq("customer_id", cid).eq("total", total).gte("ordered_at", dayStart.toISOString()).lt("ordered_at", dayEnd.toISOString()).limit(1).maybeSingle();
+        if (dupCheck.data) { dupOrders++; setProgress(Math.round(((i + 1) / rows.length) * 100)); continue; }
+
+        const o = await supabase.from("orders").insert({ customer_id: cid, channel: "csv", total, status: "paid", ordered_at: when.toISOString(), delivery_address: r.direccion || null, delivery_postal_code: r.cp || null, delivery_barrio: r.barrio || null }).select("id").single();
         if (o.error) throw o.error;
         if (pid) {
           await supabase.from("order_items").insert({ order_id: o.data.id, product_id: pid, qty: 1, unit_price: num(r.precio), net_weight_g_snapshot: isFood ? Math.round(num(r.pack_kg) * 1000) : null });
@@ -191,7 +209,11 @@ function ImportarInner() {
       setProgress(Math.round(((i + 1) / rows.length) * 100));
     }
     setBusy(false);
-    setStatus("Importación terminada: " + ok + " filas cargadas" + (err ? ", " + err + " con error (revisá el formato)." : "."));
+    let msg = "Importación terminada: " + ok + " filas cargadas";
+    if (dupOrders) msg += ", " + dupOrders + " ventas salteadas por estar duplicadas";
+    if (dupPets) msg += ", " + dupPets + " mascotas ya existentes (no se duplicaron)";
+    if (err) msg += ", " + err + " con error (revisá el formato)";
+    setStatus(msg + ".");
     setRows(null);
   }
 
