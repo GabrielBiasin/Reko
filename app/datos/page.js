@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, PieChart, Pie, Cell } from "recharts";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, PieChart, Pie, Cell, ScatterChart, Scatter, ZAxis } from "recharts";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
 import { barrioFromCP, canonicalizeBarrios } from "@/lib/cpBarrios";
@@ -144,13 +144,14 @@ function Datos() {
   const stats = useMemo(() => {
     const orderIds = new Set(), custIds = new Set();
     let revenue = 0;
-    const byDay = {}, byBarrio = {}, byProducto = {}, byCanal = {}, byEspecie = {};
+    const byDay = {}, byBarrio = {}, byProducto = {}, byProductoQty = {}, byCanal = {}, byEspecie = {};
     filtered.forEach((f) => {
       orderIds.add(f.orderId); custIds.add(f.customerId);
       revenue += f.revenue;
       byDay[f.date] = (byDay[f.date] || 0) + f.revenue;
       byBarrio[f.barrio] = (byBarrio[f.barrio] || 0) + f.revenue;
       byProducto[f.productName] = (byProducto[f.productName] || 0) + f.revenue;
+      byProductoQty[f.productName] = (byProductoQty[f.productName] || 0) + f.qty;
       byCanal[f.channel] = (byCanal[f.channel] || 0) + f.revenue;
       const esp = f.species ? (SPECIES_LABEL[f.species] || f.species) : "Sin especie";
       byEspecie[esp] = (byEspecie[esp] || 0) + f.revenue;
@@ -176,10 +177,23 @@ function Datos() {
     const canalData = Object.entries(byCanal).sort((a, b) => b[1] - a[1]).map(([ch, v]) => ({ name: CH_LABEL[ch] || ch, value: Math.round(v) }));
     const especieData = Object.entries(byEspecie).sort((a, b) => b[1] - a[1]).map(([name, v]) => ({ name, value: Math.round(v) }));
 
+    // Facturación vs. cantidad por producto: no tenemos el costo de cada producto cargado en
+    // la base, así que no podemos calcular ganancia/margen real — esto es el mejor proxy
+    // disponible: qué productos facturan mucho con relativamente poco volumen (buen ticket
+    // por unidad) vs. cuáles necesitan mucho volumen para facturar lo mismo.
+    const productStats = Object.keys(byProducto).map((name) => {
+      const rev = byProducto[name];
+      const qty = byProductoQty[name] || 0;
+      return { name, revenue: Math.round(rev), qty, perUnit: qty ? rev / qty : 0 };
+    });
+    const productScatter = productStats.map((p) => ({ ...p, shortName: p.name.length > 40 ? p.name.slice(0, 40) + "…" : p.name }));
+    const productTable = [...productStats].sort((a, b) => b.perUnit - a.perUnit);
+
     return {
       revenue, orders: orderIds.size, customers: custIds.size,
       avgTicket: orderIds.size ? revenue / orderIds.size : 0,
       series, topBarrios, topProductos, canalData, especieData, granularity,
+      productScatter, productTable,
     };
   }, [filtered]);
 
@@ -331,6 +345,60 @@ function Datos() {
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
+
+          {/* Facturación vs. cantidad por producto: qué conviene más por volumen/ticket */}
+          <div style={box}>
+            <div style={{ fontSize: 14.5, fontWeight: 800, color: SLATE, marginBottom: 4 }}>Facturación vs. cantidad por producto</div>
+            <p style={{ fontSize: 12, color: MUTED, margin: "0 0 12px" }}>No tenemos cargado el costo de cada producto, así que esto no es ganancia real — pero te muestra qué productos facturan mucho vendiendo pocas unidades (buen ticket, arriba a la izquierda) vs. cuáles necesitan mucho volumen (abajo a la derecha).</p>
+            {!stats.productScatter.length ? <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Sin datos para este filtro.</p> : (
+              <ResponsiveContainer width="100%" height={280}>
+                <ScatterChart margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={LINE} />
+                  <XAxis type="number" dataKey="qty" name="Cantidad" tick={{ fontSize: 11, fill: MUTED }} label={{ value: "Cantidad vendida", position: "insideBottom", offset: -5, fontSize: 11, fill: MUTED }} />
+                  <YAxis type="number" dataKey="revenue" name="Facturación" tick={{ fontSize: 11, fill: MUTED }} tickFormatter={(v) => (v >= 1000 ? Math.round(v / 1000) + "k" : v)} />
+                  <ZAxis range={[60, 60]} />
+                  <Tooltip cursor={{ strokeDasharray: "3 3" }} formatter={(v, n) => (n === "Facturación" ? money(v) : v)} labelFormatter={() => ""} content={({ active, payload }) => {
+                    if (!active || !payload || !payload.length) return null;
+                    const p = payload[0].payload;
+                    return (
+                      <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 10, padding: "8px 10px", fontSize: 12, maxWidth: 220 }}>
+                        <div style={{ fontWeight: 700, color: SLATE, marginBottom: 4 }}>{p.name}</div>
+                        <div style={{ color: MUTED }}>Cantidad: {p.qty}</div>
+                        <div style={{ color: MUTED }}>Facturación: {money(p.revenue)}</div>
+                        <div style={{ color: GREEN_DK, fontWeight: 700 }}>Por unidad: {money(p.perUnit)}</div>
+                      </div>
+                    );
+                  }} />
+                  <Scatter data={stats.productScatter} fill={GREEN_DK} />
+                </ScatterChart>
+              </ResponsiveContainer>
+            )}
+            {!!stats.productTable.length && (
+              <div style={{ overflowX: "auto", marginTop: 14 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                  <thead>
+                    <tr style={{ textAlign: "left", color: MUTED, borderBottom: `1px solid ${LINE}` }}>
+                      <th style={{ padding: "6px 8px" }}>Producto</th>
+                      <th style={{ padding: "6px 8px", textAlign: "right" }}>Cantidad</th>
+                      <th style={{ padding: "6px 8px", textAlign: "right" }}>Facturación</th>
+                      <th style={{ padding: "6px 8px", textAlign: "right" }}>Por unidad</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.productTable.slice(0, 20).map((p, i) => (
+                      <tr key={i} style={{ borderBottom: `1px solid ${LINE}` }}>
+                        <td style={{ padding: "6px 8px", color: SLATE }}>{p.name}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", color: MUTED }}>{p.qty}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", color: MUTED }}>{money(p.revenue)}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 700, color: GREEN_DK }}>{money(p.perUnit)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {stats.productTable.length > 20 && <p style={{ fontSize: 11.5, color: MUTED, margin: "8px 0 0" }}>Mostrando los 20 con mejor facturación por unidad, de {stats.productTable.length} productos.</p>}
+              </div>
+            )}
+          </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             {/* Por canal */}
