@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
-import { barrioFromCP } from "@/lib/cpBarrios";
+import { barrioFromCP, canonicalizeBarrios } from "@/lib/cpBarrios";
 
 const GREEN = "#FFB63C";
 const GREEN_DK = "#c77f00";
@@ -108,12 +108,19 @@ function ClientesInner() {
   }
 
   // Barrios únicos presentes en la base (con fallback a CP), para poblar el filtro.
+  // canonicalizeBarrios unifica variantes de mayúsculas/minúsculas del mismo barrio
+  // (ej: "Almagro" y "ALMAGRO" contaban como dos opciones distintas en el filtro).
+  const resolveBarrio = useMemo(() => {
+    if (!clients) return (v) => v;
+    return canonicalizeBarrios(clients.map((c) => c.barrio || barrioFromCP(c.cp)));
+  }, [clients]);
+
   const barrios = useMemo(() => {
     if (!clients) return [];
     const set = new Set();
-    clients.forEach((c) => { const b = c.barrio || barrioFromCP(c.cp); if (b) set.add(b); });
+    clients.forEach((c) => { const b = resolveBarrio(c.barrio || barrioFromCP(c.cp)); if (b) set.add(b); });
     return Array.from(set).sort((a, b) => a.localeCompare(b, "es"));
-  }, [clients]);
+  }, [clients, resolveBarrio]);
 
   // Búsqueda por nombre / teléfono / dirección + filtro por barrio + orden, todo client-side sobre la lista ya unificada.
   const filtered = useMemo(() => {
@@ -121,7 +128,7 @@ function ClientesInner() {
     const term = q.trim().toLowerCase();
     let list = clients.filter((c) => {
       if (barrioFilter) {
-        const b = c.barrio || barrioFromCP(c.cp);
+        const b = resolveBarrio(c.barrio || barrioFromCP(c.cp));
         if (b !== barrioFilter) return false;
       }
       if (!term) return true;
@@ -136,7 +143,7 @@ function ClientesInner() {
       return 0;
     });
     return list;
-  }, [clients, q, barrioFilter, sortBy]);
+  }, [clients, q, barrioFilter, sortBy, resolveBarrio]);
 
   const searchInput = { flex: 1, border: `1px solid ${LINE}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, color: SLATE, background: "#fff", outline: "none" };
   const selectInput = { border: `1px solid ${LINE}`, borderRadius: 10, padding: "10px 10px", fontSize: 13.5, color: SLATE, background: "#fff", outline: "none" };
@@ -209,7 +216,7 @@ function ClientesInner() {
                     <span style={{ fontSize: 16, fontWeight: 700, color: SLATE }}>{c.name || "Sin nombre"}</span>
                     <span style={{ fontSize: 14, fontWeight: 700, color: GREEN_DK }}>{money(c.total)}</span>
                   </div>
-                  <div style={{ fontSize: 13, color: MUTED, marginTop: 2 }}>{c.phone}{c.addr ? " · " + c.addr : ""}{(c.barrio || barrioFromCP(c.cp)) ? " · " + (c.barrio || barrioFromCP(c.cp)) : ""}</div>
+                  <div style={{ fontSize: 13, color: MUTED, marginTop: 2 }}>{c.phone}{c.addr ? " · " + c.addr : ""}{resolveBarrio(c.barrio || barrioFromCP(c.cp)) ? " · " + resolveBarrio(c.barrio || barrioFromCP(c.cp)) : ""}</div>
                   <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 12.5, color: MUTED, alignItems: "center" }}>
                     <span>🐾 {c.pets.length}</span>
                     <span>🛒 {c.orders.length}</span>

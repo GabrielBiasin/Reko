@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, PieChart, Pie, Cell } from "recharts";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
-import { barrioFromCP } from "@/lib/cpBarrios";
+import { barrioFromCP, canonicalizeBarrios } from "@/lib/cpBarrios";
 
 const GREEN = "#FFB63C";
 const GREEN_DK = "#c77f00";
@@ -77,7 +77,7 @@ function Datos() {
     const petByCust = {}; raw.pets.forEach((p) => { if (!petByCust[p.customer_id]) petByCust[p.customer_id] = p; });
     const orderById = {}; raw.orders.forEach((o) => (orderById[o.id] = o));
 
-    return raw.items.map((it) => {
+    const list = raw.items.map((it) => {
       const o = orderById[it.order_id];
       if (!o) return null;
       const c = custById[o.customer_id] || {};
@@ -89,7 +89,7 @@ function Datos() {
         customerName: c.name || "Cliente",
         date: (o.ordered_at || "").slice(0, 10),
         channel: o.channel || "manual",
-        barrio: zoneKeyOf(o.delivery_barrio || c.barrio, o.delivery_postal_code || c.postal_code),
+        rawBarrio: zoneKeyOf(o.delivery_barrio || c.barrio, o.delivery_postal_code || c.postal_code),
         productName: p.name || "Producto",
         species: p.species || "",
         isConsumable: !!p.is_consumable,
@@ -98,6 +98,11 @@ function Datos() {
         revenue: (Number(it.unit_price) || 0) * (Number(it.qty) || 1),
       };
     }).filter(Boolean);
+
+    // Unifica "Almagro" / "ALMAGRO" / etc. en una sola forma antes de exponer el dato:
+    // así el filtro, los gráficos y la tabla usan siempre la misma versión de cada barrio.
+    const resolveBarrio = canonicalizeBarrios(list.map((f) => f.rawBarrio));
+    return list.map((f) => ({ ...f, barrio: resolveBarrio(f.rawBarrio) }));
   }, [raw]);
 
   // Opciones de los filtros: siempre calculadas sobre el dataset COMPLETO (sin filtrar),
@@ -181,6 +186,26 @@ function Datos() {
   const hasFilters = dateFrom || dateTo || barrio || producto || especie || canal || q;
   function clearFilters() { setDateFrom(""); setDateTo(""); setBarrio(""); setProducto(""); setEspecie(""); setCanal(""); setQ(""); }
 
+  // Atajos de rango: fijan Desde/Hasta a partir de hoy. Se recalculan en cada render
+  // para que "hoy" siempre sea el día real, no un valor guardado.
+  function setPresetRange(days) {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - days);
+    setDateFrom(fmtDay(from));
+    setDateTo(fmtDay(to));
+  }
+  const todayStr = fmtDay(new Date());
+  const from30Str = fmtDay(new Date(Date.now() - 30 * 86400000));
+  const from60Str = fmtDay(new Date(Date.now() - 60 * 86400000));
+  const isMonthActive = dateFrom === from30Str && dateTo === todayStr;
+  const is60Active = dateFrom === from60Str && dateTo === todayStr;
+  const presetBtnStyle = (active) => ({
+    padding: "9px 14px", fontSize: 12.5, fontWeight: 700, borderRadius: 999,
+    border: active ? "none" : `1px solid ${LINE}`,
+    background: active ? GREEN : "#fff", color: active ? SLATE : MUTED, cursor: "pointer",
+  });
+
   const Stat = ({ label, value, sub }) => (
     <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16 }}>
       <div style={{ fontSize: 12.5, color: MUTED, fontWeight: 600 }}>{label}</div>
@@ -209,6 +234,10 @@ function Datos() {
           <div style={box}>
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar cliente, producto o mascota…" style={{ ...selectInput, flex: 1 }} />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <button onClick={() => setPresetRange(30)} style={presetBtnStyle(isMonthActive)}>Último mes</button>
+              <button onClick={() => setPresetRange(60)} style={presetBtnStyle(is60Active)}>Últimos 60 días</button>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
