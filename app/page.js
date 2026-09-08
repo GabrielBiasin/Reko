@@ -2,16 +2,12 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
-import { barrioFromCP } from "@/lib/cpBarrios";
 
 const GREEN = "#FFB63C";
 const GREEN_DK = "#c77f00";
 const SLATE = "#1c2530";
 const MUTED = "#7c8278";
 const LINE = "#e7e4dd";
-
-const money = (n) => "$ " + new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(Math.round(n || 0));
-const CH_LABEL = { manual: "Mostrador", mercadolibre: "MercadoLibre", whatsapp: "WhatsApp", csv: "Importadas", web: "Web" };
 
 function waPhone(p) {
   let d = (p || "").replace(/[^0-9]/g, "");
@@ -35,50 +31,33 @@ function Dashboard() {
   async function load() {
     try {
       const soon = new Date(); soon.setDate(soon.getDate() + 7);
-      const [os, cs, preds, prods, pets, ois, tn] = await Promise.all([
-        supabase.from("orders").select("id,customer_id,channel,total,ordered_at,delivery_postal_code,delivery_barrio"),
-        supabase.from("customers").select("id,name,phone_e164,postal_code,barrio"),
+      const [preds, prods, pets, ois, orders_, tn] = await Promise.all([
         supabase.from("repurchase_predictions").select("id,customer_id,pet_id,product_id,predicted_runout_date,status").eq("status", "pending").lte("predicted_runout_date", soon.toISOString().slice(0, 10)).order("predicted_runout_date"),
         supabase.from("products").select("id,name,is_consumable"),
         supabase.from("pets").select("id,customer_id,name"),
         supabase.from("order_items").select("order_id,product_id"),
+        supabase.from("orders").select("id,customer_id"),
         supabase.from("tenants").select("name").limit(1).maybeSingle(),
       ]);
-      if (os.error) throw os.error;
+      if (preds.error) throw preds.error;
       if (tn.data && tn.data.name) setShopName(tn.data.name);
 
-      const orders = os.data || [];
-      const customers = cs.data || [];
-      const custById = {}; customers.forEach((c) => (custById[c.id] = c));
+      // Necesitamos los datos de contacto de los clientes involucrados en accionables — no toda la base.
+      const custIds = new Set();
+      (preds.data || []).forEach((p) => custIds.add(p.customer_id));
+      (orders_.data || []).forEach((o) => custIds.add(o.customer_id));
+      const cs = custIds.size ? await supabase.from("customers").select("id,name,phone_e164").in("id", Array.from(custIds)) : { data: [] };
+      if (cs.error) throw cs.error;
+
+      const custById = {}; (cs.data || []).forEach((c) => (custById[c.id] = c));
       const prodById = {}; (prods.data || []).forEach((p) => (prodById[p.id] = p));
       const petById = {}; (pets.data || []).forEach((p) => (petById[p.id] = p));
 
-      // Ventas por canal
-      const byChannel = {};
-      orders.forEach((o) => {
-        const ch = o.channel || "manual";
-        if (!byChannel[ch]) byChannel[ch] = { count: 0, total: 0 };
-        byChannel[ch].count += 1;
-        byChannel[ch].total += Number(o.total) || 0;
-      });
-
-      // Primera compra vs recompra (por cliente, orden cronológico)
+      // Primera compra vs recompra (por cliente, orden cronológico) — solo para saber quién es "cliente fiel"
       const byCust = {};
-      orders.forEach((o) => { (byCust[o.customer_id] = byCust[o.customer_id] || []).push(o); });
-      let firstRevenue = 0, repRevenue = 0, repOrders = 0, custWithRep = 0;
-      const custCount = Object.keys(byCust).length;
-      Object.values(byCust).forEach((list) => {
-        list.sort((a, b) => (a.ordered_at < b.ordered_at ? -1 : 1));
-        firstRevenue += Number(list[0].total) || 0;
-        if (list.length > 1) {
-          custWithRep += 1;
-          for (let i = 1; i < list.length; i++) { repRevenue += Number(list[i].total) || 0; repOrders += 1; }
-        }
-      });
-      const totalRevenue = firstRevenue + repRevenue;
-      const repRate = custCount ? Math.round((custWithRep / custCount) * 100) : 0;
+      (orders_.data || []).forEach((o) => { (byCust[o.customer_id] = byCust[o.customer_id] || []).push(o); });
 
-      // Accionables
+      // Accionables: recompra
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const actions = (preds.data || []).map((p) => {
         const c = custById[p.customer_id] || {};
@@ -90,7 +69,7 @@ function Dashboard() {
       });
 
       // Cross-selling: solo-alimento => ofrecer accesorios; solo-accesorios => ofrecer alimento
-      const orderCust = {}; orders.forEach((o) => (orderCust[o.id] = o.customer_id));
+      const orderCust = {}; (orders_.data || []).forEach((o) => (orderCust[o.id] = o.customer_id));
       const mix = {}; // customer_id -> {food, acc}
       (ois.data || []).forEach((it) => {
         const cid = orderCust[it.order_id]; if (!cid) return;
@@ -111,31 +90,7 @@ function Dashboard() {
       });
       crossSell.sort((a, b) => (b.loyal ? 1 : 0) - (a.loyal ? 1 : 0) || b.items - a.items);
 
-      // Zonas: siempre mostramos el NOMBRE del barrio, nunca el CP crudo.
-      // Prioridad: barrio cargado a mano > barrio derivado del CP (CABA) > "Sin dato".
-      function zoneKeyOf(barrio, cp) {
-        const b = (barrio || "").trim();
-        if (b) return b;
-        const derived = barrioFromCP(cp);
-        if (derived) return derived;
-        return "Sin dato";
-      }
-      const zones = {};
-      customers.forEach((c) => {
-        const key = zoneKeyOf(c.barrio, c.postal_code);
-        if (!zones[key]) zones[key] = { customers: 0, orders: 0, total: 0 };
-        zones[key].customers += 1;
-      });
-      orders.forEach((o) => {
-        const c = custById[o.customer_id];
-        const key = zoneKeyOf(o.delivery_barrio || (c && c.barrio), o.delivery_postal_code || (c && c.postal_code));
-        if (!zones[key]) zones[key] = { customers: 0, orders: 0, total: 0 };
-        zones[key].orders += 1;
-        zones[key].total += Number(o.total) || 0;
-      });
-      const zoneList = Object.entries(zones).map(([cp, v]) => ({ cp, ...v })).sort((a, b) => b.customers - a.customers);
-
-      setData({ orders: orders.length, customers: customers.length, byChannel, totalRevenue, repRevenue, repOrders, repRate, actions, crossSell, zoneList });
+      setData({ actions, crossSell });
     } catch (e) { setError(e.message || "Error al cargar"); }
   }
   useEffect(() => { load(); }, []);
@@ -156,23 +111,15 @@ function Dashboard() {
     setData((d) => ({ ...d, crossSell: d.crossSell.filter((y) => y.id !== x.id) }));
   }
 
-  const Stat = ({ label, value, sub, accent }) => (
-    <div style={{ background: accent ? GREEN : "#fff", border: `1px solid ${accent ? GREEN : LINE}`, borderRadius: 16, padding: 16 }}>
-      <div style={{ fontSize: 12.5, color: accent ? "rgba(28,37,48,.72)" : MUTED, fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 800, color: SLATE, marginTop: 2 }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: accent ? "rgba(28,37,48,.72)" : MUTED, marginTop: 3 }}>{sub}</div>}
-    </div>
-  );
-
   return (
     <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 16px 50px" }}>
       <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 16px" }}>Reko de <span style={{ color: GREEN_DK }}>{shopName}</span></h1>
       {error && <p style={{ color: "#b04b3f" }}>{error}</p>}
-      {!data && !error && <p style={{ color: MUTED }}>Cargando métricas…</p>}
+      {!data && !error && <p style={{ color: MUTED }}>Cargando…</p>}
 
       {data && (
         <>
-          {/* Accionables primero: es lo que genera plata */}
+          {/* Accionables primero y únicos: es lo que genera plata. Métricas y gráficos viven en /datos. */}
           <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16, marginBottom: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
               <span style={{ fontSize: 15, fontWeight: 800, color: SLATE }}>🔥 Recompras para impulsar</span>
@@ -202,7 +149,7 @@ function Dashboard() {
           </div>
 
           {/* Cross-selling */}
-          <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16, marginBottom: 16 }}>
+          <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
               <span style={{ fontSize: 15, fontWeight: 800, color: SLATE }}>🧲 Cross-selling</span>
               <span style={{ fontSize: 12.5, color: MUTED }}>{data.crossSell.length} oportunidades</span>
@@ -223,47 +170,6 @@ function Dashboard() {
                     Sin número registrado
                   </span>
                 )}
-              </div>
-            ))}
-          </div>
-
-          {/* Métricas */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-            <Stat label="Ingresos por recompra" value={money(data.repRevenue)} sub={`${data.repOrders} recompras · plata extra ganada`} accent />
-            <Stat label="Ventas totales" value={money(data.totalRevenue)} sub={`${data.orders} ventas`} />
-            <Stat label="% de clientes que recompran" value={data.repRate + "%"} sub={`de ${data.customers} clientes`} />
-            <Stat label="Clientes" value={data.customers} />
-          </div>
-
-          {/* Zonas */}
-          <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16, marginBottom: 16 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: SLATE, marginBottom: 10 }}>📍 Zonas (por barrio / CP)</div>
-            {(!data.zoneList || !data.zoneList.length) && <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Cargá barrio y CP en tus clientes para ver qué zonas tenés más cubiertas.</p>}
-            {(data.zoneList || []).slice(0, 10).map((z) => {
-              const pct = data.customers ? Math.round((z.customers / data.customers) * 100) : 0;
-              return (
-                <div key={z.cp} style={{ padding: "9px 0", borderBottom: `1px solid ${LINE}` }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 14 }}>
-                    <span style={{ fontWeight: 700, color: z.cp === "Sin dato" ? MUTED : SLATE }}>{z.cp}</span>
-                    <span style={{ fontWeight: 800, color: GREEN_DK }}>{pct}%</span>
-                  </div>
-                  <div style={{ height: 8, background: "#f1ede3", borderRadius: 5, overflow: "hidden", margin: "5px 0 4px" }}>
-                    <div style={{ width: pct + "%", height: "100%", background: GREEN }} />
-                  </div>
-                  <div style={{ fontSize: 12, color: MUTED }}>{z.customers} clientes · {z.orders} ventas · {money(z.total)}</div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Por canal */}
-          <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 16, padding: 16 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: SLATE, marginBottom: 10 }}>Ventas por canal</div>
-            {!Object.keys(data.byChannel).length && <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Todavía no hay ventas cargadas.</p>}
-            {Object.entries(data.byChannel).map(([ch, v]) => (
-              <div key={ch} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "8px 0", borderBottom: `1px solid ${LINE}` }}>
-                <span style={{ fontWeight: 600, color: SLATE }}>{CH_LABEL[ch] || ch}</span>
-                <span style={{ color: MUTED }}>{v.count} ventas · <b style={{ color: GREEN_DK }}>{money(v.total)}</b></span>
               </div>
             ))}
           </div>
