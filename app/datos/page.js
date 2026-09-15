@@ -4,6 +4,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
 import { barrioFromCP, canonicalizeBarrios } from "@/lib/cpBarrios";
+import { waPhone, hasValidPhone, PhoneAction, logContact, timeAgo } from "@/lib/waActions";
 
 const GREEN = "#FFB63C";
 const GREEN_DK = "#c77f00";
@@ -40,6 +41,8 @@ const selectInput = { border: `1px solid ${LINE}`, borderRadius: 10, padding: "9
 function Datos() {
   const [raw, setRaw] = useState(null);
   const [error, setError] = useState("");
+  const [shopName, setShopName] = useState("tu tienda");
+  const [contactLog, setContactLog] = useState([]);
 
   // Filtros
   const [dateFrom, setDateFrom] = useState("");
@@ -50,18 +53,27 @@ function Datos() {
   const [canal, setCanal] = useState("");
   const [q, setQ] = useState("");
 
+  // Edición inline de teléfono en la lista de clientes filtrados (mismo componente que Inicio).
+  const [editingPhone, setEditingPhone] = useState(null);
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [savingPhone, setSavingPhone] = useState(false);
+
   useEffect(() => {
     (async () => {
       try {
-        const [os, ois, prods, cs, pets] = await Promise.all([
+        const [os, ois, prods, cs, pets, tn, log] = await Promise.all([
           supabase.from("orders").select("id,customer_id,channel,total,status,ordered_at,delivery_postal_code,delivery_barrio"),
           supabase.from("order_items").select("id,order_id,product_id,qty,unit_price"),
           supabase.from("products").select("id,name,species,is_consumable,category"),
-          supabase.from("customers").select("id,name,postal_code,barrio"),
+          supabase.from("customers").select("id,name,phone_e164,postal_code,barrio"),
           supabase.from("pets").select("id,customer_id,name"),
+          supabase.from("tenants").select("name").limit(1).maybeSingle(),
+          supabase.from("contact_log").select("customer_id,contacted_at").order("contacted_at", { ascending: false }),
         ]);
         if (os.error) throw os.error;
         if (ois.error) throw ois.error;
+        if (tn.data && tn.data.name) setShopName(tn.data.name);
+        setContactLog(log.data || []);
         setRaw({ orders: os.data || [], items: ois.data || [], products: prods.data || [], customers: cs.data || [], pets: pets.data || [] });
       } catch (e) { setError(e.message || "Error al cargar"); }
     })();
@@ -139,6 +151,70 @@ function Datos() {
       return true;
     });
   }, [facts, dateFrom, dateTo, barrio, producto, especie, canal, q]);
+
+  const custById = useMemo(() => {
+    const m = {};
+    if (raw) raw.customers.forEach((c) => (m[c.id] = c));
+    return m;
+  }, [raw]);
+
+  const lastContactByCustomer = useMemo(() => {
+    const m = {};
+    contactLog.forEach((r) => { if (!m[r.customer_id] || r.contacted_at > m[r.customer_id]) m[r.customer_id] = r.contacted_at; });
+    return m;
+  }, [contactLog]);
+
+  // Un renglón por cliente distinto que aparece en el filtro actual — para poder accionar
+  // el contacto directamente desde acá (WhatsApp o marcar contactado a mano), en vez de tener
+  // que ir a buscar cada cliente en la sección Clientes.
+  const filteredCustomers = useMemo(() => {
+    const agg = {};
+    filtered.forEach((f) => {
+      if (!agg[f.customerId]) {
+        agg[f.customerId] = { id: f.customerId, name: f.customerName, phone: (custById[f.customerId] || {}).phone_e164 || "", barrio: f.barrio, total: 0, last: null };
+      }
+      agg[f.customerId].total += f.revenue;
+      if (!agg[f.customerId].last || f.date > agg[f.customerId].last) agg[f.customerId].last = f.date;
+    });
+    return Object.values(agg).sort((a, b) => b.total - a.total);
+  }, [filtered, custById]);
+
+  function startEditPhone(key) {
+    setEditingPhone(key);
+    setPhoneDraft("");
+  }
+  function cancelEditPhone() {
+    setEditingPhone(null);
+    setPhoneDraft("");
+  }
+  async function savePhone(key, customerId) {
+    const phone = phoneDraft.trim();
+    if (!phone) return;
+    setSavingPhone(true);
+    const { error: err } = await supabase.from("customers").update({ phone_e164: phone }).eq("id", customerId);
+    setSavingPhone(false);
+    if (err) { alert("No se pudo guardar: " + err.message); return; }
+    setRaw((r) => ({ ...r, customers: r.customers.map((c) => (c.id === customerId ? { ...c, phone_e164: phone } : c)) }));
+    cancelEditPhone();
+  }
+
+  // Abre WhatsApp con un saludo genérico (el motivo del contacto varía según qué filtro armó
+  // el operador — no hay un único mensaje que sirva para todos los casos) y deja registrado
+  // el contacto al toque, igual que marcarlo a mano.
+  function sendWhatsApp(c) {
+    const first = (c.name || "Hola").split(" ")[0];
+    const msg = `Hola ${first}! 👋 Te escribimos de ${shopName}.`;
+    window.open("https://wa.me/" + waPhone(c.phone) + "?text=" + encodeURIComponent(msg), "_blank");
+    logContact(c.id, "Contacto desde filtro de Datos");
+    setContactLog((log) => [{ customer_id: c.id, contacted_at: new Date().toISOString() }, ...log]);
+  }
+
+  // Registro manual — para cuando el contacto se hizo por otro medio (llamada, en persona)
+  // y no a través del botón de WhatsApp de acá arriba.
+  async function markContacted(customerId) {
+    await logContact(customerId, "Marcado manualmente desde Datos");
+    setContactLog((log) => [{ customer_id: customerId, contacted_at: new Date().toISOString() }, ...log]);
+  }
 
   // KPIs + series para gráficos, todo recalculado en vivo sobre lo filtrado.
   const stats = useMemo(() => {
@@ -305,6 +381,59 @@ function Datos() {
             <Stat label="Ticket promedio" value={money(stats.avgTicket)} />
             <Stat label="Clientes en el filtro" value={stats.customers} />
             <Stat label="Ítems vendidos" value={filtered.length} />
+          </div>
+
+          {/* Clientes en este filtro: accionar contacto directo sobre el segmento armado con los filtros de arriba */}
+          <div style={box}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 800, color: SLATE }}>Clientes en este filtro</div>
+              <span style={{ fontSize: 12.5, color: MUTED }}>{filteredCustomers.length}</span>
+            </div>
+            <p style={{ fontSize: 12, color: MUTED, margin: "0 0 12px" }}>Contactalos directo desde acá — el envío por WhatsApp queda registrado solo. Si los contactaste por otro medio, marcalo a mano.</p>
+            {!filteredCustomers.length ? <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nadie coincide con este filtro.</p> : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                  <thead>
+                    <tr style={{ textAlign: "left", color: MUTED, borderBottom: `1px solid ${LINE}` }}>
+                      <th style={{ padding: "6px 8px" }}>Cliente</th>
+                      <th style={{ padding: "6px 8px" }}>Barrio</th>
+                      <th style={{ padding: "6px 8px", textAlign: "right" }}>Total en el filtro</th>
+                      <th style={{ padding: "6px 8px" }}>Último contacto</th>
+                      <th style={{ padding: "6px 8px" }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredCustomers.slice(0, 200).map((c) => {
+                      const lastContact = lastContactByCustomer[c.id];
+                      const rowKey = "datos:" + c.id;
+                      return (
+                        <tr key={c.id} style={{ borderBottom: `1px solid ${LINE}` }}>
+                          <td style={{ padding: "8px", color: SLATE, fontWeight: 600 }}>{c.name}</td>
+                          <td style={{ padding: "8px", color: MUTED }}>{c.barrio}</td>
+                          <td style={{ padding: "8px", textAlign: "right", color: MUTED }}>{money(c.total)}</td>
+                          <td style={{ padding: "8px", color: lastContact ? GREEN_DK : MUTED, fontWeight: lastContact ? 700 : 400, whiteSpace: "nowrap" }}>
+                            {lastContact ? timeAgo(lastContact) : "Nunca"}
+                          </td>
+                          <td style={{ padding: "8px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                              <PhoneAction
+                                rowKey={rowKey} customerId={c.id} phone={c.phone} onSend={() => sendWhatsApp(c)}
+                                editingPhone={editingPhone} phoneDraft={phoneDraft} setPhoneDraft={setPhoneDraft} savingPhone={savingPhone}
+                                onStartEdit={startEditPhone} onCancelEdit={cancelEditPhone} onSave={savePhone}
+                              />
+                              <button onClick={() => markContacted(c.id)} style={{ width: "auto", padding: "8px 10px", fontSize: 11.5, fontWeight: 700, color: MUTED, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>
+                                ✓ Marcar
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {filteredCustomers.length > 200 && <p style={{ fontSize: 11.5, color: MUTED, margin: "8px 0 0" }}>Mostrando los 200 de mayor facturación en el filtro, de {filteredCustomers.length} clientes.</p>}
+              </div>
+            )}
           </div>
 
           {/* Evolución en el tiempo */}

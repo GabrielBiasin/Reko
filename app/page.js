@@ -2,66 +2,13 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
+import { waPhone, hasValidPhone, PhoneAction, logContact } from "@/lib/waActions";
 
 const GREEN = "#FFB63C";
 const GREEN_DK = "#c77f00";
 const SLATE = "#1c2530";
 const MUTED = "#7c8278";
 const LINE = "#e7e4dd";
-
-function waPhone(p) {
-  let d = (p || "").replace(/[^0-9]/g, "");
-  if (d.startsWith("0")) d = d.slice(1);
-  if (!d.startsWith("54")) d = "54" + d;
-  return d;
-}
-
-// Valida que haya un número real para contactar (no vacío, no "Sin datos", con suficientes dígitos).
-function hasValidPhone(p) {
-  if (!p) return false;
-  const digits = p.replace(/[^0-9]/g, "");
-  return digits.length >= 10;
-}
-
-// Reemplaza el botón de WhatsApp cuando no hay teléfono cargado: en vez de solo avisar "Sin número",
-// deja completarlo ahí mismo sin salir de Inicio. Va fuera de Dashboard (recibe todo por props) para
-// que no se recree en cada render — si viviera adentro, el input perdería el foco en cada tecla.
-function PhoneAction({ rowKey, customerId, phone, onSend, editingPhone, phoneDraft, setPhoneDraft, savingPhone, onStartEdit, onCancelEdit, onSave }) {
-  if (hasValidPhone(phone)) {
-    return (
-      <button onClick={onSend} style={{ width: "auto", padding: "10px 14px", fontSize: 13.5, fontWeight: 700, color: "#fff", background: "#25D366", border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
-        WhatsApp →
-      </button>
-    );
-  }
-  if (editingPhone === rowKey) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <input
-          autoFocus
-          type="tel"
-          inputMode="tel"
-          value={phoneDraft}
-          onChange={(e) => setPhoneDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") onSave(rowKey, customerId); if (e.key === "Escape") onCancelEdit(); }}
-          placeholder="+54 9 11 ..."
-          style={{ width: 120, padding: "9px 8px", fontSize: 13, border: `1px solid ${LINE}`, borderRadius: 8, outline: "none" }}
-        />
-        <button onClick={() => onSave(rowKey, customerId)} disabled={savingPhone || !phoneDraft.trim()} style={{ width: "auto", padding: "9px 10px", fontSize: 13, fontWeight: 700, color: "#fff", background: savingPhone || !phoneDraft.trim() ? "#c2c8bd" : GREEN_DK, border: "none", borderRadius: 8, cursor: savingPhone ? "default" : "pointer" }}>
-          {savingPhone ? "…" : "✓"}
-        </button>
-        <button onClick={onCancelEdit} style={{ width: "auto", padding: "9px 10px", fontSize: 13, fontWeight: 700, color: MUTED, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, cursor: "pointer" }}>
-          ✕
-        </button>
-      </div>
-    );
-  }
-  return (
-    <button onClick={() => onStartEdit(rowKey)} style={{ width: "auto", padding: "10px 14px", fontSize: 12.5, fontWeight: 700, color: "#b04b3f", background: "#fbe9e6", border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
-      Sin número · Agregar
-    </button>
-  );
-}
 
 function Dashboard() {
   const [data, setData] = useState(null);
@@ -166,6 +113,7 @@ function Dashboard() {
     const cta = `Hola ${a.customer.split(" ")[0]}! 🐾 Te escribimos de ${shopName}. Según nuestras cuentas, ${a.product} de ${a.pet} está por terminarse en estos días. ¿Querés que te preparemos otra bolsa así no te quedás sin? Respondé este mensaje y te lo dejamos listo 😊`;
     window.open("https://wa.me/" + waPhone(a.phone) + "?text=" + encodeURIComponent(cta), "_blank");
     await supabase.from("repurchase_predictions").update({ status: "contacted" }).eq("id", a.id);
+    logContact(a.customerId, "Recordatorio de recompra: " + a.product);
     setData((d) => ({ ...d, actions: d.actions.filter((x) => x.id !== a.id) }));
   }
 
@@ -175,6 +123,7 @@ function Dashboard() {
       ? `Hola ${first}! 🐾 Te escribimos de ${shopName}. Vemos que siempre llevás el alimento de ${x.pet} con nosotros 💚 ¿Sabías que también tenemos juguetes, correas, camitas y todo para mimarlo? Contanos qué le gustaría y te armamos algo lindo.`
       : `Hola ${first}! 🐾 Te escribimos de ${shopName}. ¿Sabías que también trabajamos el alimento de ${x.pet}? Si nos contás qué come, te avisamos antes de que se le termine así nunca te quedás sin 😊`;
     window.open("https://wa.me/" + waPhone(x.phone) + "?text=" + encodeURIComponent(cta), "_blank");
+    logContact(x.id, x.dir === "acc" ? "Cross-selling: ofrecer accesorios" : "Cross-selling: ofrecer alimento");
     setData((d) => ({ ...d, crossSell: d.crossSell.filter((y) => y.id !== x.id) }));
   }
 
