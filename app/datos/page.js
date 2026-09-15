@@ -4,7 +4,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { supabase } from "@/lib/supabaseClient";
 import Protected from "@/lib/Protected";
 import { barrioFromCP, canonicalizeBarrios } from "@/lib/cpBarrios";
-import { waPhone, hasValidPhone, PhoneAction, logContact, timeAgo } from "@/lib/waActions";
+import { waPhone, hasValidPhone, PhoneAction, logContact, unlogContact, timeAgo } from "@/lib/waActions";
 
 const GREEN = "#FFB63C";
 const GREEN_DK = "#c77f00";
@@ -43,6 +43,10 @@ function Datos() {
   const [error, setError] = useState("");
   const [shopName, setShopName] = useState("tu tienda");
   const [contactLog, setContactLog] = useState([]);
+  // Marca por cliente el id de la última fila de contact_log que se generó EN ESTA SESIÓN
+  // (no la del historial ya guardado) — solo esa se puede deshacer con un click, para no
+  // permitir borrar contactos viejos por accidente.
+  const [undoable, setUndoable] = useState({});
 
   // Filtros
   const [dateFrom, setDateFrom] = useState("");
@@ -201,19 +205,47 @@ function Datos() {
   // Abre WhatsApp con un saludo genérico (el motivo del contacto varía según qué filtro armó
   // el operador — no hay un único mensaje que sirva para todos los casos) y deja registrado
   // el contacto al toque, igual que marcarlo a mano.
-  function sendWhatsApp(c) {
+  async function sendWhatsApp(c) {
     const first = (c.name || "Hola").split(" ")[0];
     const msg = `Hola ${first}! 👋 Te escribimos de ${shopName}.`;
     window.open("https://wa.me/" + waPhone(c.phone) + "?text=" + encodeURIComponent(msg), "_blank");
-    logContact(c.id, "Contacto desde filtro de Datos");
     setContactLog((log) => [{ customer_id: c.id, contacted_at: new Date().toISOString() }, ...log]);
+    const logId = await logContact(c.id, "Contacto desde filtro de Datos");
+    if (logId) setUndoable((u) => ({ ...u, [c.id]: logId }));
   }
 
   // Registro manual — para cuando el contacto se hizo por otro medio (llamada, en persona)
   // y no a través del botón de WhatsApp de acá arriba.
   async function markContacted(customerId) {
-    await logContact(customerId, "Marcado manualmente desde Datos");
     setContactLog((log) => [{ customer_id: customerId, contacted_at: new Date().toISOString() }, ...log]);
+    const logId = await logContact(customerId, "Marcado manualmente desde Datos");
+    if (logId) setUndoable((u) => ({ ...u, [customerId]: logId }));
+  }
+
+  // Deshace el último contacto marcado EN ESTA SESIÓN para ese cliente, por si fue un click
+  // de más — solo está disponible mientras esa marca siga siendo la última acción tomada acá.
+  async function undoContact(customerId) {
+    const logId = undoable[customerId];
+    if (!logId) return;
+    await unlogContact(logId);
+    setContactLog((log) => {
+      const idx = log.findIndex((r) => r.customer_id === customerId);
+      if (idx === -1) return log;
+      return [...log.slice(0, idx), ...log.slice(idx + 1)];
+    });
+    setUndoable((u) => { const n = { ...u }; delete n[customerId]; return n; });
+  }
+
+  // Mismo flujo que sendWhatsApp, pero desde la tabla de Detalle (por ítem vendido): el mensaje
+  // referencia el producto puntual de esa fila en vez de un saludo genérico.
+  async function sendWhatsAppForFact(f) {
+    const phone = (custById[f.customerId] || {}).phone_e164 || "";
+    const first = (f.customerName || "Hola").split(" ")[0];
+    const msg = `Hola ${first}! 👋 Te escribimos de ${shopName} por tu compra de ${f.productName}.`;
+    window.open("https://wa.me/" + waPhone(phone) + "?text=" + encodeURIComponent(msg), "_blank");
+    setContactLog((log) => [{ customer_id: f.customerId, contacted_at: new Date().toISOString() }, ...log]);
+    const logId = await logContact(f.customerId, "Contacto desde Detalle: " + f.productName);
+    if (logId) setUndoable((u) => ({ ...u, [f.customerId]: logId }));
   }
 
   // KPIs + series para gráficos, todo recalculado en vivo sobre lo filtrado.
@@ -413,6 +445,11 @@ function Datos() {
                           <td style={{ padding: "8px", textAlign: "right", color: MUTED }}>{money(c.total)}</td>
                           <td style={{ padding: "8px", color: lastContact ? GREEN_DK : MUTED, fontWeight: lastContact ? 700 : 400, whiteSpace: "nowrap" }}>
                             {lastContact ? timeAgo(lastContact) : "Nunca"}
+                            {undoable[c.id] && (
+                              <span onClick={() => undoContact(c.id)} style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: "#b04b3f", cursor: "pointer", textDecoration: "underline" }}>
+                                Deshacer
+                              </span>
+                            )}
                           </td>
                           <td style={{ padding: "8px" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
@@ -570,6 +607,7 @@ function Datos() {
                       <th style={{ padding: "6px 8px" }}>Canal</th>
                       <th style={{ padding: "6px 8px" }}>Barrio</th>
                       <th style={{ padding: "6px 8px", textAlign: "right" }}>Total</th>
+                      <th style={{ padding: "6px 8px" }}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -581,6 +619,13 @@ function Datos() {
                         <td style={{ padding: "6px 8px", color: MUTED }}>{CH_LABEL[f.channel] || f.channel}</td>
                         <td style={{ padding: "6px 8px", color: MUTED }}>{f.barrio}</td>
                         <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 700, color: GREEN_DK }}>{money(f.revenue)}</td>
+                        <td style={{ padding: "6px 8px" }}>
+                          <PhoneAction
+                            rowKey={"detalle:" + f.customerId} customerId={f.customerId} phone={(custById[f.customerId] || {}).phone_e164 || ""} onSend={() => sendWhatsAppForFact(f)}
+                            editingPhone={editingPhone} phoneDraft={phoneDraft} setPhoneDraft={setPhoneDraft} savingPhone={savingPhone}
+                            onStartEdit={startEditPhone} onCancelEdit={cancelEditPhone} onSave={savePhone}
+                          />
+                        </td>
                       </tr>
                     ))}
                   </tbody>
